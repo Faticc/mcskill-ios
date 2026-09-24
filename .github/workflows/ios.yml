@@ -16,13 +16,43 @@ jobs:
 
       - name: Tools
         run: |
-          brew install protobuf xcodegen ldid
+          brew install protobuf xcodegen ldid ninja
           xcodebuild -version
           swift --version
           /opt/homebrew/bin/protoc --version
 
       - name: Core tests (swift test)
         run: swift test --package-path HTSCore 2>&1 | tee core-tests.log
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: SDL3 cache
+        uses: actions/cache@v4
+        with:
+          path: build/sdl-out
+          key: sdl-3.4.16-${{ hashFiles('sdl/**', 'scripts/build-sdl.sh') }}
+
+      - name: Game libraries cache
+        uses: actions/cache@v4
+        with:
+          path: game-cache
+          key: game-libs-v1
+
+      # SDL3 with our UIKit/ANGLE layer for device and simulator, and the render test program
+      - name: Game libraries
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          [ -f build/sdl-out/device/libSDL3.dylib ] || bash scripts/build-sdl.sh device build/sdl-out/device
+          [ -f build/sdl-out/simulator/libSDL3.dylib ] || bash scripts/build-sdl.sh simulator build/sdl-out/simulator
+          mkdir -p game-cache build/gltest/classes build/gltest/lwjgl
+          [ -s game-cache/lwjgl-3.4.1-ios.tar.gz ] || gh release download deps-1 -R Faticc/mcskill-ios -p lwjgl-3.4.1-ios.tar.gz -D game-cache
+          tar -xzf game-cache/lwjgl-3.4.1-ios.tar.gz -C build/gltest/lwjgl
+          javac --release 17 -cp "$(ls build/gltest/lwjgl/jars/*.jar | paste -sd: -)" -d build/gltest/classes tests/gltest/HtsGLTest.java
+          jar cf build/gltest/gltest.jar -C build/gltest/classes .
 
       - name: Generate Xcode project
         run: xcodegen generate
@@ -47,6 +77,8 @@ jobs:
           key: jre-ios-8-17-25-v1
 
       - name: Build unsigned IPA
+        env:
+          GH_TOKEN: ${{ github.token }}
         run: |
           xcodebuild -project HTS.xcodeproj -scheme HTS -configuration Release \
             -destination 'generic/platform=iOS' \
@@ -61,21 +93,30 @@ jobs:
           nm -gU Payload/HTS.app/HTS > exports.txt
           grep ' _DeviceHasTXM$' exports.txt || { echo "DeviceHasTXM not exported"; exit 1; }
           bash scripts/pack-jre.sh Payload/HTS.app jre-cache
-          # Ad-hoc signatures and entitlements (as Amethyst): runtimes first, then the app bundle
-          find Payload/HTS.app/java_runtimes -type f -name '*.dylib' -exec ldid -S {} \;
+          bash scripts/pack-game-libs.sh Payload/HTS.app game-cache build/sdl-out/device/libSDL3.dylib build/gltest/gltest.jar
+          # Ad-hoc signatures and entitlements (as Amethyst): runtimes and libraries first, then the app
+          find Payload/HTS.app/java_runtimes Payload/HTS.app/Frameworks -type f | while read -r f; do
+              if file -b "$f" | grep -q '^Mach-O'; then ldid -S "$f"; fi
+          done
           ldid -Sentitlements.sideload.xml Payload/HTS.app
           ldid -e Payload/HTS.app/HTS
           zip -qry HTS.ipa Payload
           ls -la HTS.ipa
 
       # The iOS JREs retagged for the simulator: does each JVM start, and does its JIT compile
-      - name: Java in the simulator
+      - name: Java and rendering in the simulator
         continue-on-error: true
+        env:
+          GH_TOKEN: ${{ github.token }}
         run: |
           SIMAPP=build/sim/Build/Products/Debug-iphonesimulator/HTS.app
           bash scripts/pack-jre.sh "$SIMAPP" jre-cache simulator
+          bash scripts/pack-game-libs.sh "$SIMAPP" game-cache build/sdl-out/simulator/libSDL3.dylib build/gltest/gltest.jar simulator
           codesign -f -s - "$SIMAPP"
-          bash scripts/sim-java-probe.sh "$SIMAPP" java-probe
+          failed=0
+          bash scripts/sim-java-probe.sh "$SIMAPP" java-probe || failed=1
+          bash scripts/sim-gltest.sh "$SIMAPP" java-probe || failed=1
+          exit $failed
 
       - uses: actions/upload-artifact@v4
         with:

@@ -49,6 +49,21 @@ final class AppModel: ObservableObject {
         }
         JavaRuntimes.exportJITScript()
         checkCrashedProbe()
+        // `--gltest`: CI checks the render path (SDL, ANGLE, gl4es) in the simulator this way
+        if args.contains("--gltest") {
+            Task {
+                try? await Task.sleep(nanoseconds: 1_500_000_000)
+                let runtime = javaRuntimes.last { $0.major >= 17 } ?? javaRuntimes.last
+                do {
+                    guard let runtime, GameRuntime.installed else { throw NSError(domain: "HTS", code: 1, userInfo: [NSLocalizedDescriptionKey: "no game runtime in this build"]) }
+                    try GameRuntime.runGLTest(runtime: runtime)
+                } catch {
+                    AppLog.error("GL test: \(error.localizedDescription)")
+                    try? Data("{\"ok\" : false, \"error\" : \"\(error.localizedDescription)\"}".utf8)
+                        .write(to: GameRuntime.glTestReport)
+                }
+            }
+        }
         // `--probe-java <major>`: CI starts each bundled JVM in the simulator this way
         if let major = args.firstIndex(of: "--probe-java").flatMap({ $0 + 1 < args.count ? Int(args[$0 + 1]) : nil }) {
             Task {

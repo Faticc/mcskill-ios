@@ -67,4 +67,6 @@ targets:
         # HTSJava (Objective-C, the JVM and JIT side) and the JNI headers it builds against
         SWIFT_OBJC_BRIDGING_HEADER: App/HTS-Bridging-Header.h
         HEADER_SEARCH_PATHS: $(SRCROOT)/App/Native $(SRCROOT)/App/Native/include
+        # SDL3, ANGLE, gl4es, LWJGL natives go to Frameworks (scripts/pack-game-libs.sh) and find each other by @rpath
+        LD_RUNPATH_SEARCH_PATHS: $(inherited) @executable_path/Frameworks
     scheme: {}

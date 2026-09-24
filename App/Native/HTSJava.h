@@ -40,6 +40,21 @@ typedef NS_OPTIONS(uint32_t, HTSJITFlags) {
                                                     log:(NSString *)logPath
                                                   error:(NSError **)error;
 
+/**
+ * Starts the JVM of `javaHome` in this process and runs `mainClass.main(args)` on the JVM's own
+ * thread (16 MB stack). Returns once the class and its main are found; the program keeps running.
+ * `environment` is set before the JVM starts; HTS_SDL_LIBRARY there gets SDL_SetMainReady called.
+ * When the program calls System.exit, the app exits with it.
+ */
++ (BOOL)launchJavaHome:(NSString *)javaHome
+                heapMb:(int)heapMb
+               jvmArgs:(NSArray<NSString *> *)jvmArgs
+             mainClass:(NSString *)mainClass
+                  args:(NSArray<NSString *> *)args
+           environment:(NSDictionary<NSString *, NSString *> *)environment
+                   log:(NSString *)logPath
+                 error:(NSError **)error;
+
 @end
 
 NS_ASSUME_NONNULL_END

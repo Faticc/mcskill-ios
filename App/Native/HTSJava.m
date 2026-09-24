@@ -162,6 +162,10 @@ static NSString *gLoadedHome;
 @property int heapMb;
 @property (copy) NSArray<NSString *> *extraArgs;
 @property (copy) NSString *logPath;
+/** Launch mode: the class whose main(String[]) runs on the JVM's thread; nil = probe. */
+@property (copy) NSString *mainClass;
+@property (copy) NSArray<NSString *> *mainArgs;
+@property (copy) NSDictionary<NSString *, NSString *> *environment;
 @property (strong) NSMutableDictionary<NSString *, id> *result;
 @property (copy) NSString *failure;
 @property (strong) dispatch_semaphore_t done;
@@ -231,6 +235,10 @@ static NSString *StartVM(HTSProbeJob *job, JNIEnv **envOut) {
     NSString *home = job.home;
     NSFileManager *fm = NSFileManager.defaultManager;
 
+    [job.environment enumerateKeysAndObjectsUsingBlock:^(NSString *key, NSString *value, BOOL *stop) {
+        setenv(key.UTF8String, value.UTF8String, 1);
+        printf("[HTS] env %s=%s\n", key.UTF8String, value.UTF8String);
+    }];
     setenv("JAVA_HOME", home.fileSystemRepresentation, 1);
     setenv("HACK_IGNORE_START_ON_FIRST_THREAD", "1", 1);
     setenv("XNU_HAS_TXM", DeviceHasTXM() ? "1" : "0", 1);
@@ -256,6 +264,15 @@ static NSString *StartVM(HTSProbeJob *job, JNIEnv **envOut) {
     if (!create) return @"В libjvm нет JNI_CreateJavaVM";
 
     NSString *docs = NSSearchPathForDirectoriesInDomains(NSDocumentDirectory, NSUserDomainMask, YES).firstObject;
+    // SDL on iOS refuses to start unless told that main() is set up (lwjgl3ify never does)
+    const char *sdl = getenv("HTS_SDL_LIBRARY");
+    if (sdl && *sdl) {
+        void *lib = dlopen(sdl, RTLD_NOW | RTLD_GLOBAL);
+        void (*setMainReady)(void) = lib ? (void (*)(void))dlsym(lib, "SDL_SetMainReady") : NULL;
+        if (setMainReady) setMainReady();
+        printf("[HTS] SDL %s: %s\n", sdl, lib ? "loaded" : dlerror());
+    }
+
     NSMutableArray<NSString *> *args = [NSMutableArray arrayWithArray:@[
         @"-Xms64M",
         [NSString stringWithFormat:@"-Xmx%dM", job.heapMb],
@@ -272,6 +289,11 @@ static NSString *StartVM(HTSProbeJob *job, JNIEnv **envOut) {
         [args addObject:@"-XX:+MirrorMappedCodeCache"];
     }
     [args addObjectsFromArray:job.extraArgs];
+    if (job.mainClass) {
+        NSString *command = [[@[job.mainClass] arrayByAddingObjectsFromArray:job.mainArgs ?: @[]]
+                             componentsJoinedByString:@" "];
+        [args addObject:[@"-Dsun.java.command=" stringByAppendingString:command]];
+    }
 
     JavaVMOption *options = calloc(args.count, sizeof(JavaVMOption));
     for (NSUInteger i = 0; i < args.count; i++) {
@@ -379,6 +401,40 @@ static void Measure(HTSProbeJob *job, JNIEnv *env) {
     fflush(stdout);
 }
 
+/** Looks up main(String[]) of the job's class; nil and the reason in job.failure if it's not there. */
+static jmethodID FindMain(HTSProbeJob *job, JNIEnv *env, jclass *classOut) {
+    NSString *name = [job.mainClass stringByReplacingOccurrencesOfString:@"." withString:@"/"];
+    jclass cls = (*env)->FindClass(env, name.UTF8String);
+    if (!cls || TakeException(env)) {
+        job.failure = [NSString stringWithFormat:@"Класс %@ не найден, подробности в jvm.log", job.mainClass];
+        return NULL;
+    }
+    jmethodID main = (*env)->GetStaticMethodID(env, cls, "main", "([Ljava/lang/String;)V");
+    if (!main || TakeException(env)) {
+        job.failure = [NSString stringWithFormat:@"У %@ нет main(String[])", job.mainClass];
+        return NULL;
+    }
+    *classOut = cls;
+    return main;
+}
+
+static void RunMain(HTSProbeJob *job, JNIEnv *env, jclass cls, jmethodID main) {
+    NSArray<NSString *> *mainArgs = job.mainArgs ?: @[];
+    jclass stringClass = (*env)->FindClass(env, "java/lang/String");
+    jobjectArray array = (*env)->NewObjectArray(env, (jsize)mainArgs.count, stringClass, NULL);
+    for (NSUInteger i = 0; i < mainArgs.count; i++) {
+        jstring s = (*env)->NewStringUTF(env, mainArgs[i].UTF8String);
+        (*env)->SetObjectArrayElement(env, array, (jsize)i, s);
+        (*env)->DeleteLocalRef(env, s);
+    }
+    printf("[HTS] %s.main(%lu args)\n", job.mainClass.UTF8String, (unsigned long)mainArgs.count);
+    fflush(stdout);
+    (*env)->CallStaticVoidMethod(env, cls, main, array);
+    BOOL threw = TakeException(env);
+    printf("[HTS] %s.main %s\n", job.mainClass.UTF8String, threw ? "threw, see above" : "returned");
+    fflush(stdout);
+}
+
 static void *ProbeThread(void *arg) {
     HTSProbeJob *job = (__bridge_transfer HTSProbeJob *)arg;
     @autoreleasepool {
@@ -386,11 +442,19 @@ static void *ProbeThread(void *arg) {
         NSString *failure = StartVM(job, &env);
         if (failure) {
             job.failure = failure;
+            dispatch_semaphore_signal(job.done);
+            return NULL;
+        }
+        if (job.mainClass) {
+            jclass cls = NULL;
+            jmethodID main = FindMain(job, env, &cls);
+            // The caller gets its answer once the game's main is found; the game runs on here
+            dispatch_semaphore_signal(job.done);
+            if (main) RunMain(job, env, cls, main);
         } else {
             Measure(job, env);
+            dispatch_semaphore_signal(job.done);
         }
-        dispatch_semaphore_signal(job.done);
-        if (failure) return NULL;
     }
     // This thread created the JVM and stays attached to it; it parks instead of exiting
     for (;;) pause();
@@ -421,6 +485,30 @@ static void *ProbeThread(void *arg) {
                                      extraArgs:(NSArray<NSString *> *)extraArgs
                                            log:(NSString *)logPath
                                          error:(NSError **)error {
+    return [self runJavaHome:javaHome heapMb:heapMb jvmArgs:extraArgs mainClass:nil mainArgs:nil
+                 environment:nil log:logPath error:error];
+}
+
++ (BOOL)launchJavaHome:(NSString *)javaHome
+                heapMb:(int)heapMb
+               jvmArgs:(NSArray<NSString *> *)jvmArgs
+             mainClass:(NSString *)mainClass
+                  args:(NSArray<NSString *> *)args
+           environment:(NSDictionary<NSString *, NSString *> *)environment
+                   log:(NSString *)logPath
+                 error:(NSError **)error {
+    return [self runJavaHome:javaHome heapMb:heapMb jvmArgs:jvmArgs mainClass:mainClass mainArgs:args
+                 environment:environment log:logPath error:error] != nil;
+}
+
++ (NSDictionary<NSString *, id> *)runJavaHome:(NSString *)javaHome
+                                      heapMb:(int)heapMb
+                                     jvmArgs:(NSArray<NSString *> *)extraArgs
+                                   mainClass:(NSString *)mainClass
+                                    mainArgs:(NSArray<NSString *> *)mainArgs
+                                 environment:(NSDictionary<NSString *, NSString *> *)environment
+                                         log:(NSString *)logPath
+                                       error:(NSError **)error {
     NSString *failure = nil;
     NSDictionary *result = nil;
     @synchronized(self) {
@@ -439,13 +527,16 @@ static void *ProbeThread(void *arg) {
             job.heapMb = heapMb;
             job.extraArgs = extraArgs;
             job.logPath = logPath;
+            job.mainClass = mainClass;
+            job.mainArgs = mainArgs;
+            job.environment = environment;
             job.result = [NSMutableDictionary dictionary];
             job.done = dispatch_semaphore_create(0);
 
-            // HotSpot wants a big stack on the thread that creates it
+            // HotSpot wants a big stack on the thread that creates it, and the game runs on it
             pthread_attr_t attr;
             pthread_attr_init(&attr);
-            pthread_attr_setstacksize(&attr, 8 << 20);
+            pthread_attr_setstacksize(&attr, 16 << 20);
             pthread_attr_setdetachstate(&attr, PTHREAD_CREATE_DETACHED);
             pthread_t thread;
             int rc = pthread_create(&thread, &attr, ProbeThread, (__bridge_retained void *)job);
