@@ -39,6 +39,19 @@ public enum AppLog {
         write("E", message)
     }
 
+    /** The end of the log, for the log window. */
+    public static func tail(maxBytes: Int) -> String {
+        queue.sync {}
+        guard let handle = try? FileHandle(forReadingFrom: fileURL) else { return "(лога нет)" }
+        defer { try? handle.close() }
+        let size = (try? handle.seekToEnd()) ?? 0
+        let start = size > UInt64(maxBytes) ? size - UInt64(maxBytes) : 0
+        try? handle.seek(toOffset: start)
+        let data = (try? handle.readToEnd()) ?? Data()
+        let text = String(decoding: data, as: UTF8.self)
+        return text.isEmpty ? "(лога нет)" : text
+    }
+
     private static func write(_ level: String, _ message: String) {
         let line = "\(formatter.string(from: Date())) \(level) \(message)\n"
         print(line, terminator: "")

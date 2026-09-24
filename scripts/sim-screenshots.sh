@@ -1,6 +1,7 @@
 #!/bin/bash
-# Installs the simulator build, takes screenshots of the login screen and of the demo server list,
-# and copies the app's own log. Usage: scripts/sim-screenshots.sh <HTS.app> <out dir>
+# Installs the simulator build and takes screenshots of every screen and window: the login, then
+# the demo account (--demo) with each window opened by --screen. Copies the app's own log.
+# Usage: scripts/sim-screenshots.sh <HTS.app> <out dir>
 set -euo pipefail
 
 APP="$1"
@@ -30,14 +31,31 @@ xcrun simctl bootstatus "$UDID" -b
 xcrun simctl status_bar "$UDID" override --time 9:41 --batteryLevel 100 || true
 xcrun simctl install "$UDID" "$APP"
 
-xcrun simctl launch "$UDID" "$BUNDLE"
-sleep 8
-xcrun simctl io "$UDID" screenshot "$OUT/1-login.png"
-xcrun simctl terminate "$UDID" "$BUNDLE" || true
+shot() {
+    local name="$1"
+    shift
+    xcrun simctl terminate "$UDID" "$BUNDLE" 2>/dev/null || true
+    xcrun simctl launch "$UDID" "$BUNDLE" "$@" >/dev/null
+    sleep 5
+    xcrun simctl io "$UDID" screenshot "$OUT/$name.png" >/dev/null
+    echo "shot $name"
+}
 
-xcrun simctl launch "$UDID" "$BUNDLE" --demo
-sleep 6
-xcrun simctl io "$UDID" screenshot "$OUT/2-servers-demo.png"
+# The first start also has to register the app and fonts; give it longer
+xcrun simctl launch "$UDID" "$BUNDLE" >/dev/null
+sleep 8
+xcrun simctl io "$UDID" screenshot "$OUT/01-login.png" >/dev/null
+echo "shot 01-login"
+
+shot 02-home --demo
+shot 03-menu --demo --screen menu
+shot 04-settings --demo --screen settings
+shot 05-help --demo --screen help
+shot 06-mods --demo --screen mods
+shot 07-progress --demo --screen progress
+shot 08-unavailable --demo --screen unavailable
+shot 09-mfa --demo --screen mfa
+shot 10-totp --demo --screen totp
 
 DATA=$(xcrun simctl get_app_container "$UDID" "$BUNDLE" data)
 cp "$DATA/Documents/logs/launcher.log" "$OUT/launcher.log" || echo "no app log"

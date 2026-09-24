@@ -58,6 +58,25 @@ final class FormatTests: XCTestCase {
     }
 }
 
+final class ClientProfileTests: XCTestCase {
+    private func java(_ v: String) -> Int {
+        ClientProfileInfo(id: 1, version: "", clientDir: "", javaVersion: v, minimumRam: 0, recommendedRam: 0).javaMajor
+    }
+
+    func testJavaMajor() {
+        XCTAssertEqual(java("25-temurin"), 25)
+        XCTAssertEqual(java("1.8"), 8)
+        XCTAssertEqual(java("17.0.2"), 17)
+        XCTAssertEqual(java(""), 0)
+    }
+
+    func testMegabytes() {
+        XCTAssertEqual(ClientProfileInfo.megabytes(4), 4096)
+        XCTAssertEqual(ClientProfileInfo.megabytes(3072), 3072)
+        XCTAssertEqual(ClientProfileInfo.megabytes(0), 0)
+    }
+}
+
 /**
  * The real server over TLS + HTTP/2 + gRPC with a made-up session: checks the whole transport
  * without an account. Skipped (not failed) when the runner cannot reach McSkill at all.

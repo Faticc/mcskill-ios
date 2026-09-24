@@ -70,6 +70,16 @@ public final class McSkillAPI: @unchecked Sendable {
         return response.clients.map(ServerInfo.init)
     }
 
+    /** How to install and start one client: folders, Java, memory. */
+    public func clientProfile(id: Int, session: String) async throws -> ClientProfileInfo {
+        var request = Launcher_GetClientRequest()
+        request.clientID = Int32(id)
+        let response = try await call {
+            try await clients.getClient(request, callOptions: options(session: session))
+        }
+        return ClientProfileInfo(response.client)
+    }
+
     private func options(session: String?) -> CallOptions {
         var options = CallOptions()
         options.timeLimit = .timeout(Self.deadline)

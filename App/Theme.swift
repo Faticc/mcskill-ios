@@ -1,8 +1,9 @@
 import SwiftUI
 
 /**
- * Look of the McSkill launcher, same values as the Android app (ui/Theme.java): near-black
- * background with a teal glow at the top, dark cards with hairline borders, teal accent.
+ * Look of the McSkill launcher, the same values as the Android app (ui/Theme.java): near-black
+ * background with a teal glow at the top, dark cards with hairline borders, teal accent, gold for
+ * favourites, Inter everywhere. Android dp/sp map 1:1 to points.
  */
 enum Theme {
     static let bg = Color(hex: 0x121214)
@@ -10,6 +11,7 @@ enum Theme {
     static let card = Color(hex: 0x1F1F22)
     static let cardBorder = Color(hex: 0x2A2B30)
     static let panel = Color(hex: 0x1F2024)
+    static let panelBorder = Color(hex: 0x2C2D31)
     static let tile = Color(hex: 0x262629)
     static let field = Color(hex: 0x17171A)
     static let fieldBorder = Color(hex: 0x303136)
@@ -18,6 +20,7 @@ enum Theme {
     static let accentLight = Color(hex: 0x39A6B6)
     static let accentDark = Color(hex: 0x03849C)
     static let gold = Color(hex: 0xFFB800)
+    static let goldBorder = Color(argb: 0x99FFB800)
     static let wipe = Color(hex: 0xE5A54B)
     static let green = Color(hex: 0x22C55E)
     static let red = Color(hex: 0xEF4444)
@@ -31,6 +34,15 @@ enum Theme {
     static let tileTeal = Color(hex: 0x28353A)
     static let tileRed = Color(hex: 0x3E292C)
     static let tileGreen = Color(hex: 0x25392F)
+    static let tileGold = Color(hex: 0x3A3322)
+
+    /** Left-to-right teal gradient of the play button. */
+    static let accentGradient = LinearGradient(colors: [accentLight, accentDark], startPoint: .leading, endPoint: .trailing)
+
+    static func regular(_ size: CGFloat) -> Font { .custom("Inter-Regular", fixedSize: size) }
+    static func medium(_ size: CGFloat) -> Font { .custom("Inter-Medium", fixedSize: size) }
+    static func semibold(_ size: CGFloat) -> Font { .custom("Inter-SemiBold", fixedSize: size) }
+    static func bold(_ size: CGFloat) -> Font { .custom("Inter-Bold", fixedSize: size) }
 }
 
 extension Color {
@@ -41,106 +53,57 @@ extension Color {
                   blue: Double(hex & 0xFF) / 255,
                   opacity: opacity)
     }
-}
 
-struct AppBackground: View {
-    var body: some View {
-        ZStack(alignment: .top) {
-            Theme.bg
-            RadialGradient(colors: [Theme.glow, Theme.bg.opacity(0)], center: .top,
-                           startRadius: 0, endRadius: 420)
-                .frame(height: 420)
-        }
-        .ignoresSafeArea()
+    /** Android's 0xAARRGGBB. */
+    init(argb: UInt32) {
+        self.init(hex: argb & 0xFFFFFF, opacity: Double((argb >> 24) & 0xFF) / 255)
     }
 }
 
-struct PrimaryButtonStyle: ButtonStyle {
-    func makeBody(configuration: Configuration) -> some View {
-        configuration.label
-            .font(.system(size: 14, weight: .bold))
-            .textCase(.uppercase)
-            .kerning(0.8)
-            .foregroundStyle(.white)
-            .frame(maxWidth: .infinity, minHeight: 46)
-            .background(
-                RoundedRectangle(cornerRadius: 10)
-                    .fill(LinearGradient(colors: [Theme.accentLight, Theme.accentDark],
-                                         startPoint: .top, endPoint: .bottom))
-            )
-            .opacity(configuration.isPressed ? 0.8 : 1)
-    }
+extension String {
+    /** Uppercase the way the launcher's labels are. */
+    var caps: String { uppercased(with: Locale(identifier: "ru")) }
 }
 
 extension View {
-    func card(fill: Color = Theme.card, border: Color = Theme.cardBorder, radius: CGFloat = 12) -> some View {
+    /** Rounded fill with an optional hairline border: Ui.rounded() of the Android app. */
+    func box(_ fill: Color, radius: CGFloat, border: Color? = nil) -> some View {
         background(RoundedRectangle(cornerRadius: radius).fill(fill))
-            .overlay(RoundedRectangle(cornerRadius: radius).stroke(border, lineWidth: 1))
+            .overlay {
+                if let border { RoundedRectangle(cornerRadius: radius).strokeBorder(border, lineWidth: 1) }
+            }
+    }
+
+    /** Dark card of the details panel (Ui.card). */
+    func panelCard() -> some View {
+        padding(12)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .box(Theme.panel, radius: 12, border: Theme.panelBorder)
     }
 }
 
-/** Text field with an icon, as on the McSkill login card. */
-struct Field: View {
-    let icon: String
-    let placeholder: String
-    @Binding var text: String
-    var secure = false
+/**
+ * Root background, "Фоновое свечение": a wide, flat teal ellipse centred above the top edge, a
+ * little left of centre like the PC launcher (GlowLayout).
+ */
+struct GlowBackground: View {
+    var glow = true
 
     var body: some View {
-        HStack(spacing: 10) {
-            Image(systemName: icon)
-                .foregroundStyle(Theme.text3)
-                .frame(width: 18)
-            Group {
-                if secure {
-                    SecureField("", text: $text, prompt: Text(placeholder).foregroundColor(Theme.text3))
-                } else {
-                    TextField("", text: $text, prompt: Text(placeholder).foregroundColor(Theme.text3))
-                }
-            }
-            .textInputAutocapitalization(.never)
-            .autocorrectionDisabled()
-            .foregroundStyle(Theme.text)
+        Canvas { ctx, size in
+            ctx.fill(Path(CGRect(origin: .zero, size: size)), with: .color(Theme.bg))
+            guard glow, size.width > 0 else { return }
+            let radius = size.width * 0.5
+            ctx.translateBy(x: size.width * 0.48, y: -size.height * 0.04)
+            ctx.scaleBy(x: 1, y: min(1, size.height * 0.55 / radius))
+            let gradient = Gradient(stops: [
+                .init(color: Theme.glow, location: 0),
+                .init(color: Color(argb: 0x990E2E33), location: 0.45),
+                .init(color: Color(argb: 0x00121214), location: 1),
+            ])
+            ctx.fill(Path(ellipseIn: CGRect(x: -radius, y: -radius, width: radius * 2, height: radius * 2)),
+                     with: .radialGradient(gradient, center: .zero, startRadius: 0, endRadius: radius))
         }
-        .padding(.horizontal, 14)
-        .frame(height: 48)
-        .card(fill: Theme.field, border: Theme.fieldBorder, radius: 10)
-    }
-}
-
-/** Chips that wrap onto the next line. */
-struct FlowLayout: Layout {
-    var spacing: CGFloat = 6
-
-    func sizeThatFits(proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) -> CGSize {
-        let width = proposal.width ?? .infinity
-        var x: CGFloat = 0, y: CGFloat = 0, row: CGFloat = 0, widest: CGFloat = 0
-        for view in subviews {
-            let size = view.sizeThatFits(.unspecified)
-            if x > 0 && x + size.width > width {
-                x = 0
-                y += row + spacing
-                row = 0
-            }
-            x += size.width + spacing
-            row = max(row, size.height)
-            widest = max(widest, x - spacing)
-        }
-        return CGSize(width: proposal.width ?? widest, height: y + row)
-    }
-
-    func placeSubviews(in bounds: CGRect, proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) {
-        var x = bounds.minX, y = bounds.minY, row: CGFloat = 0
-        for view in subviews {
-            let size = view.sizeThatFits(.unspecified)
-            if x > bounds.minX && x + size.width > bounds.maxX {
-                x = bounds.minX
-                y += row + spacing
-                row = 0
-            }
-            view.place(at: CGPoint(x: x, y: y), proposal: ProposedViewSize(size))
-            x += size.width + spacing
-            row = max(row, size.height)
-        }
+        .ignoresSafeArea()
     }
 }
