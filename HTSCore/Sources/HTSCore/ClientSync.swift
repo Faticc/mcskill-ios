@@ -228,6 +228,17 @@ public final class SyncProgress: @unchecked Sendable {
         public var checked: Int, toCheck: Int
         public var downloadedFiles: Int, filesToDownload: Int
         public var downloadedBytes: Int64, bytesToDownload: Int64
+
+        public init(phase: Phase, checked: Int, toCheck: Int, downloadedFiles: Int, filesToDownload: Int,
+                    downloadedBytes: Int64, bytesToDownload: Int64) {
+            self.phase = phase
+            self.checked = checked
+            self.toCheck = toCheck
+            self.downloadedFiles = downloadedFiles
+            self.filesToDownload = filesToDownload
+            self.downloadedBytes = downloadedBytes
+            self.bytesToDownload = bytesToDownload
+        }
     }
 
     public var snapshot: Snapshot {

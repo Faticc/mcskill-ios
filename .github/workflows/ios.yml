@@ -71,7 +71,7 @@ jobs:
             -derivedDataPath build/sim \
             -skipPackagePluginValidation -skipMacroValidation \
             build 2>&1 | tee sim-build.log | grep -E "error:|warning: .*HTS|BUILD" || true
-          test -f build/sim/Build/Products/Debug-iphonesimulator/HTS.app/Info.plist
+          test -f build/sim/Build/Products/Debug-iphonesimulator/HTS.app/HTS
           plutil -p build/sim/Build/Products/Debug-iphonesimulator/HTS.app/Info.plist
 
       - name: Simulator screenshots
@@ -93,7 +93,7 @@ jobs:
             -skipPackagePluginValidation -skipMacroValidation \
             CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO CODE_SIGN_IDENTITY="" \
             build 2>&1 | tee device-build.log | grep -E "error:|BUILD" || true
-          test -f build/dev/Build/Products/Release-iphoneos/HTS.app/Info.plist
+          test -f build/dev/Build/Products/Release-iphoneos/HTS.app/HTS
           mkdir -p Payload
           cp -R build/dev/Build/Products/Release-iphoneos/HTS.app Payload/
           # libjvm finds DeviceHasTXM with dlsym, it has to stay exported
