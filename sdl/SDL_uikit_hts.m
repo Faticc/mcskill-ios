@@ -23,6 +23,7 @@
 #include <dlfcn.h>
 #include <pthread.h>
 #include <stdio.h>
+#include <TargetConditionals.h>
 
 // MARK: - main thread
 
@@ -365,7 +366,13 @@ static EGLConfig HTS_ChooseConfig(SDL_VideoDevice *_this)
         { 0, 16, 0, 0 },
         { 0, 0, 0, 0 },
     };
-    for (size_t i = 0; i < SDL_arraysize(tries); i++) {
+    size_t first = 0;
+#if TARGET_OS_SIMULATOR
+    // In the simulator ANGLE gives a stencil config separate Depth32Float and Stencil8 textures,
+    // which Metal's validation rejects on the first draw
+    first = 1;
+#endif
+    for (size_t i = first; i < SDL_arraysize(tries); i++) {
         const EGLint attribs[] = {
             EGL_RED_SIZE, 8,
             EGL_GREEN_SIZE, 8,
