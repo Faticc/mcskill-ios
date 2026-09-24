@@ -112,6 +112,10 @@ static HTSJITFlags ComputeJITFlags(void) {
             flags = (HTSJITFlags)strtoul(s, NULL, 0);
             return;
         }
+#if TARGET_OS_SIMULATOR
+        // A macOS process underneath: no TXM, no debugger dance
+        return;
+#endif
         if (@available(iOS 26.0, *)) {
             flags |= HTSJITFlagIOS26;
             if (!DeviceCanCreateRXMap()) flags |= HTSJITFlagForceMirrored;
@@ -134,8 +138,9 @@ static BOOL RequiresTXMWorkaround(void) {
 
 static BOOL JITEnabled(void) {
 #if TARGET_OS_SIMULATOR
-    // The simulator has no iOS JREs to run; csops isn't needed there
-    return NO;
+    // The simulator runs as a macOS process, where JIT isn't restricted (CI runs the probe there
+    // with JREs retagged for the simulator platform)
+    return YES;
 #endif
     int flags = 0;
     csops(getpid(), CS_OPS_STATUS, &flags, sizeof(flags));

@@ -49,6 +49,17 @@ final class AppModel: ObservableObject {
         }
         JavaRuntimes.exportJITScript()
         checkCrashedProbe()
+        // `--probe-java <major>`: CI starts each bundled JVM in the simulator this way
+        if let major = args.firstIndex(of: "--probe-java").flatMap({ $0 + 1 < args.count ? Int(args[$0 + 1]) : nil }) {
+            Task {
+                try? await Task.sleep(nanoseconds: 1_500_000_000)
+                if let runtime = javaRuntimes.first(where: { $0.major == major }) {
+                    probeJava(runtime)
+                } else {
+                    JavaRuntimes.writeProbeReport(["major": major, "ok": false, "error": "no bundled Java \(major)"])
+                }
+            }
+        }
         if Prefs.forgetAccount { SessionStore.clear() }
         session = SessionStore.load()
         servers = ServerCache.load()
@@ -272,9 +283,13 @@ final class AppModel: ObservableObject {
             switch outcome {
             case .success(let raw):
                 let result = JavaProbeResult(runtime: runtime, raw)
+                JavaRuntimes.writeProbeReport(["major": runtime.major, "ok": true, "jitWorks": result.jitWorks,
+                                               "summary": result.summary])
                 AppLog.info("Java probe ok: \(result.summary.replacingOccurrences(of: "\n", with: "; "))")
                 showProbeResult(result)
             case .failure(let error):
+                JavaRuntimes.writeProbeReport(["major": runtime.major, "ok": false,
+                                               "error": error.localizedDescription])
                 AppLog.error("Java probe failed: \(error.localizedDescription)")
                 showJavaFailure("Java не запустилась", error.localizedDescription)
             }

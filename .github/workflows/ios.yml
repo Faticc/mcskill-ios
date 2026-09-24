@@ -68,6 +68,15 @@ jobs:
           zip -qry HTS.ipa Payload
           ls -la HTS.ipa
 
+      # The iOS JREs retagged for the simulator: does each JVM start, and does its JIT compile
+      - name: Java in the simulator
+        continue-on-error: true
+        run: |
+          SIMAPP=build/sim/Build/Products/Debug-iphonesimulator/HTS.app
+          bash scripts/pack-jre.sh "$SIMAPP" jre-cache simulator
+          codesign -f -s - "$SIMAPP"
+          bash scripts/sim-java-probe.sh "$SIMAPP" java-probe
+
       - uses: actions/upload-artifact@v4
         with:
           name: HTS-ipa
@@ -79,6 +88,13 @@ jobs:
         with:
           name: screenshots
           path: screenshots
+          if-no-files-found: ignore
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: java-probe
+          path: java-probe
           if-no-files-found: ignore
 
       - uses: actions/upload-artifact@v4

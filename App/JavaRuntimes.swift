@@ -52,6 +52,15 @@ enum JavaRuntimes {
     /** Written before a probe, removed after it: still there on start means the JVM took the app down. */
     static let probeMarker = AppLog.fileURL.deletingLastPathComponent().appendingPathComponent("jvm-probe.running")
 
+    /** logs/jvm-probe.json: the last probe's outcome, for CI and for sharing. */
+    static let probeReport = AppLog.fileURL.deletingLastPathComponent().appendingPathComponent("jvm-probe.json")
+
+    static func writeProbeReport(_ report: [String: Any]) {
+        guard let data = try? JSONSerialization.data(withJSONObject: report, options: [.prettyPrinted, .sortedKeys])
+        else { return }
+        try? data.write(to: probeReport, options: .atomic)
+    }
+
     /** Documents/JIT/UniversalJIT26.js, to be picked in StikDebug's "Assign Script". */
     static let jitScriptFolder = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0]
         .appendingPathComponent("JIT", isDirectory: true)
