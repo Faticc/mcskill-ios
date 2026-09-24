@@ -218,8 +218,8 @@ static NSString *PrepareTXM(void) {
     void *region = JIT26CreateRegionLegacy(page);
     if ((uint32_t)(uintptr_t)region != 0x690000E0) {
         munmap(region, page);
-        return @"StikDebug запустил HTS со старым скриптом JIT. Назначьте HTS скрипт UniversalJIT26.js "
-               @"(он лежит в «Файлы» → HTS → JIT) и запустите заново.";
+        return @"StikDebug запустил McSkill со старым скриптом JIT. Назначьте McSkill скрипт UniversalJIT26.js "
+               @"(он лежит в «Файлы» → McSkill → JIT) и запустите заново.";
     }
     NSString *path = [NSBundle.mainBundle pathForResource:@"UniversalJIT26Extension" ofType:@"js"];
     NSString *script = path ? [NSString stringWithContentsOfFile:path encoding:NSUTF8StringEncoding error:nil] : nil;

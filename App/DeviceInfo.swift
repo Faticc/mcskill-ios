@@ -17,7 +17,7 @@ enum DeviceInfo {
         let version = bundle?["CFBundleShortVersionString"] as? String ?? "?"
         let build = bundle?["CFBundleVersion"] as? String ?? "?"
         let device = UIDevice.current
-        return "HTS \(version) (\(build)), \(machine), \(device.systemName) \(device.systemVersion)"
+        return "McSkill \(version) (\(build)), \(machine), \(device.systemName) \(device.systemVersion)"
     }
 }
 

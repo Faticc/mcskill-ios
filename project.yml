@@ -30,7 +30,7 @@ targets:
         CFBundlePackageType: $(PRODUCT_BUNDLE_PACKAGE_TYPE)
         CFBundleInfoDictionaryVersion: "6.0"
         LSRequiresIPhoneOS: true
-        CFBundleDisplayName: HTS
+        CFBundleDisplayName: McSkill
         CFBundleShortVersionString: "0.2.0"
         CFBundleVersion: "2"
         CFBundleDevelopmentRegion: ru

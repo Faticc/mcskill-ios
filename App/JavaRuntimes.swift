@@ -109,9 +109,9 @@ struct JITStatus {
     var hint: String {
         if enabled { return "Java может работать. JIT действует до закрытия приложения." }
         if flags.contains(.txm) {
-            return "На этом iPhone JIT даёт только StikDebug со скриптом UniversalJIT26.js (лежит в «Файлы» → HTS → JIT). Запускайте HTS из StikDebug и не закрывайте StikDebug."
+            return "На этом iPhone JIT даёт только StikDebug со скриптом UniversalJIT26.js (лежит в «Файлы» → McSkill → JIT). Запускайте McSkill из StikDebug и не закрывайте StikDebug."
         }
-        return "Без JIT Java на iOS не запускается. Откройте HTS через StikDebug (или SideStore → Enable JIT) и вернитесь в приложение."
+        return "Без JIT Java на iOS не запускается. Откройте McSkill через StikDebug (или SideStore → Enable JIT) и вернитесь в приложение."
     }
 }
 

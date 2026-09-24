@@ -9,7 +9,8 @@ on:
 jobs:
   build:
     runs-on: macos-26
-    timeout-minutes: 45
+    # The last green runs took 44-45 min; 45 cut the next two off just before the IPA
+    timeout-minutes: 75
     defaults:
       run:
         shell: bash
@@ -110,8 +111,8 @@ jobs:
           done
           ldid -Sentitlements.sideload.xml Payload/HTS.app
           ldid -e Payload/HTS.app/HTS
-          zip -qry HTS.ipa Payload
-          ls -la HTS.ipa
+          zip -qry McSkill.ipa Payload
+          ls -la McSkill.ipa
 
       # The iOS JREs retagged for the simulator: does each JVM start, and does its JIT compile
       - name: Java and rendering in the simulator
@@ -130,8 +131,8 @@ jobs:
 
       - uses: actions/upload-artifact@v4
         with:
-          name: HTS-ipa
-          path: HTS.ipa
+          name: McSkill-ipa
+          path: McSkill.ipa
           if-no-files-found: ignore
 
       - uses: actions/upload-artifact@v4
