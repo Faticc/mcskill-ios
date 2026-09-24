@@ -53,7 +53,8 @@ enum JavaRuntimes {
     static let probeMarker = AppLog.fileURL.deletingLastPathComponent().appendingPathComponent("jvm-probe.running")
 
     /** Documents/JIT/UniversalJIT26.js, to be picked in StikDebug's "Assign Script". */
-    static let jitScriptFolder = Platform.documents.appendingPathComponent("JIT", isDirectory: true)
+    static let jitScriptFolder = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0]
+        .appendingPathComponent("JIT", isDirectory: true)
 
     static func exportJITScript() {
         guard let source = Bundle.main.url(forResource: "UniversalJIT26", withExtension: "js") else { return }
