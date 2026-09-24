@@ -58,7 +58,8 @@ jobs:
           mkdir -p Payload
           cp -R build/dev/Build/Products/Release-iphoneos/HTS.app Payload/
           # libjvm finds DeviceHasTXM with dlsym, it has to stay exported
-          nm -gU Payload/HTS.app/HTS | grep -q ' _DeviceHasTXM$' || { echo "DeviceHasTXM not exported"; exit 1; }
+          nm -gU Payload/HTS.app/HTS > exports.txt
+          grep ' _DeviceHasTXM$' exports.txt || { echo "DeviceHasTXM not exported"; exit 1; }
           bash scripts/pack-jre.sh Payload/HTS.app jre-cache
           # Ad-hoc signatures and entitlements (as Amethyst): runtimes first, then the app bundle
           find Payload/HTS.app/java_runtimes -type f -name '*.dylib' -exec ldid -S {} \;
