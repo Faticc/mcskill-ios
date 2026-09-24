@@ -16,7 +16,7 @@ jobs:
 
       - name: Tools
         run: |
-          brew install protobuf xcodegen
+          brew install protobuf xcodegen ldid
           xcodebuild -version
           swift --version
           /opt/homebrew/bin/protoc --version
@@ -40,6 +40,12 @@ jobs:
       - name: Simulator screenshots
         run: bash scripts/sim-screenshots.sh build/sim/Build/Products/Debug-iphonesimulator/HTS.app screenshots
 
+      - name: JRE cache
+        uses: actions/cache@v4
+        with:
+          path: jre-cache
+          key: jre-ios-8-17-25-v1
+
       - name: Build unsigned IPA
         run: |
           xcodebuild -project HTS.xcodeproj -scheme HTS -configuration Release \
@@ -51,6 +57,13 @@ jobs:
           test -f build/dev/Build/Products/Release-iphoneos/HTS.app/Info.plist
           mkdir -p Payload
           cp -R build/dev/Build/Products/Release-iphoneos/HTS.app Payload/
+          # libjvm finds DeviceHasTXM with dlsym, it has to stay exported
+          nm -gU Payload/HTS.app/HTS | grep -q ' _DeviceHasTXM$' || { echo "DeviceHasTXM not exported"; exit 1; }
+          bash scripts/pack-jre.sh Payload/HTS.app jre-cache
+          # Ad-hoc signatures and entitlements (as Amethyst): runtimes first, then the app bundle
+          find Payload/HTS.app/java_runtimes -type f -name '*.dylib' -exec ldid -S {} \;
+          ldid -Sentitlements.sideload.xml Payload/HTS.app
+          ldid -e Payload/HTS.app/HTS
           zip -qry HTS.ipa Payload
           ls -la HTS.ipa
 

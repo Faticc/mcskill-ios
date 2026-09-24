@@ -51,6 +51,21 @@ enum Demo {
         ServerInfo(id: 93, title: "Test HiTech", version: "1.7.10", online: 3, isTest: true),
     ]
 
+    static let runtimes: [JavaRuntime] = [(8, "1.8.0_472"), (17, "17.0.20"), (25, "25.0.4")].map {
+        JavaRuntime(major: $0.0, version: $0.1,
+                    home: JavaRuntimes.root.appendingPathComponent("java-\($0.0)-openjdk", isDirectory: true))
+    }
+
+    static let jit = JITStatus(enabled: false, debugger: false, flags: [.iOS26, .txm])
+
+    static func probe(_ runtime: JavaRuntime) -> JavaProbeResult {
+        JavaProbeResult(runtime: runtime,
+                        properties: ["java.version": runtime.version, "java.vm.name": "OpenJDK 64-Bit Server VM",
+                                     "java.vm.info": "mixed mode"],
+                        startMs: 412, sortMs: [2140, 388, 96, 91, 90, 92],
+                        compiler: "HotSpot 64-Bit Tiered Compilers", compileMs: 1830, processors: 6, maxMemoryMb: 256)
+    }
+
     static func profile(_ server: ServerInfo) -> ClientProfileInfo {
         ClientProfileInfo(id: server.id, version: server.version, clientDir: server.title, javaVersion: "25-temurin",
                           minimumRam: 3072, recommendedRam: 4096)

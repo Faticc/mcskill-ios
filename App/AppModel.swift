@@ -20,6 +20,7 @@ final class AppModel: ObservableObject {
     @Published private(set) var favourites = Prefs.favourites
     @Published var glow = Prefs.glow
     @Published var accountMenuOpen = false
+    @Published private(set) var jit = JITStatus.current
 
     let overlay = Overlay()
     private(set) lazy var login = LoginFlow(model: self)
@@ -36,6 +37,7 @@ final class AppModel: ObservableObject {
         demoScreen = args.firstIndex(of: "--screen").flatMap { $0 + 1 < args.count ? args[$0 + 1] : nil }
         AppLog.info("Start \(DeviceInfo.summary)\(demo ? " (demo \(demoScreen ?? "home"))" : "")")
         if demo {
+            jit = Demo.jit
             if !["login", "mfa", "totp"].contains(demoScreen ?? "") { session = Demo.session }
             servers = Demo.servers
             pickSelection()
@@ -45,6 +47,8 @@ final class AppModel: ObservableObject {
             }
             return
         }
+        JavaRuntimes.exportJITScript()
+        checkCrashedProbe()
         if Prefs.forgetAccount { SessionStore.clear() }
         session = SessionStore.load()
         servers = ServerCache.load()
@@ -170,7 +174,8 @@ final class AppModel: ObservableObject {
                 }
                 AppLog.info("Profile \(server.id): java \(profile.javaVersion), dir \(profile.clientDir)")
                 bar = .idle
-                unavailable(server, profile)
+                refreshJIT()
+                javaCheck(server, profile)
             } catch {
                 bar = .idle
                 let e = McSkillError.from(error)
@@ -189,14 +194,129 @@ final class AppModel: ObservableObject {
         bar = .idle
     }
 
-    private func unavailable(_ server: ServerInfo, _ profile: ClientProfileInfo) {
+    /** The game itself doesn't start on iOS yet: what the client would run on, and a way to test it. */
+    private func javaCheck(_ server: ServerInfo, _ profile: ClientProfileInfo) {
         let java = profile.javaMajor
-        overlay.show(width: 440) {
-            ModalCard("Клиент недоступен на iOS") {
-                ModalText("\(server.title) \(server.version) работает на Java \(java). Встроенной сборки этой Java для iOS пока нет, поэтому клиент не запустится.")
+        let runtimes = javaRuntimes
+        guard let runtime = JavaRuntimes.pick(for: java, in: runtimes) else {
+            let list = runtimes.map { String($0.major) }.joined(separator: ", ")
+            overlay.show(width: 440) {
+                ModalCard("Нет подходящей Java") {
+                    ModalText("\(server.title) \(server.version) работает на Java \(java), а в приложении есть только \(list.isEmpty ? "—" : list).")
+                } footer: {
+                    ModalPrimary(label: "Закрыть")
+                }
+            }
+            return
+        }
+        let jit = self.jit
+        overlay.show(width: 460) {
+            ModalCard("Клиент пока не запускается") {
+                ModalText("Запуск Minecraft на iOS ещё в работе. \(server.title) \(server.version) пойдёт на \(runtime.title) (\(runtime.version)), она уже встроена. Можно проверить, заводится ли она на этом iPhone.")
+                ModalPair(label: "Java клиента", value: "\(java) → \(runtime.title)")
+                ModalPair(label: "JIT", value: jit.title, color: jit.enabled ? Theme.green : Theme.red)
+                if !jit.enabled {
+                    ModalText(jit.hint).padding(.top, 6)
+                }
             } footer: {
+                ModalSecondary(label: "Закрыть")
+                ModalPrimary(label: "Проверить Java") { self.probeJava(runtime) }
+            }
+        }
+    }
+
+    // MARK: - java
+
+    var javaRuntimes: [JavaRuntime] {
+        demo ? Demo.runtimes : JavaRuntimes.bundled
+    }
+
+    func refreshJIT() {
+        if !demo { jit = .current }
+    }
+
+    /** Starts the runtime's JVM in this process and shows what it measured. */
+    func probeJava(_ runtime: JavaRuntime) {
+        guard bar == .idle else { return }
+        if demo {
+            showProbeResult(Demo.probe(runtime))
+            return
+        }
+        refreshJIT()
+        guard jit.enabled else {
+            showError("JIT выключен", jit.hint)
+            return
+        }
+        if let loaded = HTSJava.loadedJavaHome {
+            let name = (loaded as NSString).lastPathComponent
+            if loaded != runtime.home.path {
+                showError("Нужен перезапуск", "В этом запуске уже работает \(name). Вторую Java iOS в одном процессе не даёт: закройте HTS и откройте снова (через StikDebug).")
+            } else {
+                showError("Уже проверено", "\(runtime.title) уже запущена в этом процессе. Для повторной проверки перезапустите приложение.")
+            }
+            return
+        }
+        AppLog.info("Java probe \(runtime.major) (\(runtime.version)), \(jit.title), \(jit.details)")
+        try? String(runtime.major).write(to: JavaRuntimes.probeMarker, atomically: true, encoding: .utf8)
+        bar = .progress(title: "Проверка \(runtime.title)", detail: "Запуск JVM и замер JIT, до минуты",
+                        right: "", fraction: nil, cancellable: false)
+        let home = runtime.home.path
+        let log = JavaRuntimes.logURL.path
+        let extra = LaunchSettings.load().extraJvmArgs.split(separator: " ").map(String.init)
+        Task {
+            let outcome: Result<[String: Any], Error> = await Task.detached {
+                Result { try HTSJava.probeJavaHome(home, heapMb: 256, extraArgs: extra, log: log) }
+            }.value
+            try? FileManager.default.removeItem(at: JavaRuntimes.probeMarker)
+            bar = .idle
+            switch outcome {
+            case .success(let raw):
+                let result = JavaProbeResult(runtime: runtime, raw)
+                AppLog.info("Java probe ok: \(result.summary.replacingOccurrences(of: "\n", with: "; "))")
+                showProbeResult(result)
+            case .failure(let error):
+                AppLog.error("Java probe failed: \(error.localizedDescription)")
+                showJavaFailure("Java не запустилась", error.localizedDescription)
+            }
+        }
+    }
+
+    private func showProbeResult(_ result: JavaProbeResult) {
+        overlay.show(width: 560) {
+            ModalCard("Проверка \(result.runtime.title)") {
+                ModalPair(label: "Итог", value: result.jitWorks ? "JIT работает" : "JIT не ускоряет код",
+                          color: result.jitWorks ? Theme.green : Theme.red)
+                LogText(text: result.summary)
+                    .padding(.top, 8)
+            } footer: {
+                ModalSecondary(label: "Лог JVM", closes: false) { Platform.share(JavaRuntimes.logURL) }
                 ModalPrimary(label: "Закрыть")
             }
+        }
+    }
+
+    private func showJavaFailure(_ title: String, _ message: String) {
+        let tail = JavaRuntimes.logTail(maxBytes: 6 * 1024)
+        overlay.show(width: 720) {
+            ModalCard(title) {
+                ModalText(message)
+                if !tail.isEmpty { LogText(text: tail) }
+            } footer: {
+                ModalSecondary(label: "Поделиться", closes: false) { Platform.share(JavaRuntimes.logURL) }
+                ModalPrimary(label: "Закрыть")
+            }
+        }
+    }
+
+    /** The marker survives only when the JVM took the whole app down during the last probe. */
+    private func checkCrashedProbe() {
+        guard let major = try? String(contentsOf: JavaRuntimes.probeMarker, encoding: .utf8) else { return }
+        try? FileManager.default.removeItem(at: JavaRuntimes.probeMarker)
+        AppLog.error("Java \(major) probe crashed the app last time")
+        Task {
+            try? await Task.sleep(nanoseconds: 600_000_000)
+            showJavaFailure("Java \(major) закрыла приложение",
+                            "В прошлый раз проверка Java завершилась аварийно. Ниже конец jvm.log: поделитесь им, чтобы разобраться.")
         }
     }
 
@@ -213,8 +333,9 @@ final class AppModel: ObservableObject {
 
     // MARK: - windows
 
-    func openSettings() {
-        overlay.show(width: 620) { SettingsModal() }
+    func openSettings(advanced: Bool = false) {
+        refreshJIT()
+        overlay.show(width: 620) { SettingsModal(advanced: advanced) }
     }
 
     func openHelp(_ server: ServerInfo) {
@@ -253,6 +374,8 @@ final class AppModel: ObservableObject {
         case "totp": login.showTotpDemo()
         case "menu": accountMenuOpen = true
         case "settings": openSettings()
+        case "java": openSettings(advanced: true)
+        case "probe": showProbeResult(Demo.probe(Demo.runtimes[1]))
         case "progress":
             bar = .progress(title: "Обновление файлов", detail: "Загружено 120.4 МБ из 402.0 МБ · 812 / 2410 файлов",
                             right: "8.2 МБ/с · осталось 34с", fraction: 0.3, cancellable: true)
@@ -261,7 +384,7 @@ final class AppModel: ObservableObject {
             switch demoScreen {
             case "help": openHelp(server)
             case "mods": openMods(server)
-            case "unavailable": unavailable(server, Demo.profile(server))
+            case "unavailable": javaCheck(server, Demo.profile(server))
             default: break
             }
         }

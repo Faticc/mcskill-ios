@@ -12,7 +12,11 @@ struct SettingsModal: View {
     @State private var ramError: String?
     @State private var glow = Prefs.glow
     @State private var debug = Prefs.debug
-    @State private var advanced = false
+    @State private var advanced: Bool
+
+    init(advanced: Bool = false) {
+        _advanced = State(initialValue: advanced)
+    }
 
     var body: some View {
         ModalCard("Настройки") {
@@ -103,6 +107,7 @@ struct SettingsModal: View {
     private var advancedTab: some View {
         let renderer = Renderer(rawValue: settings.renderer) ?? .gl4es
         return VStack(alignment: .leading, spacing: 0) {
+            javaGroup
             group("ic_monitor", "Рендер") {
                 Choices(labels: Renderer.allCases.map(\.title),
                         selected: Renderer.allCases.firstIndex(of: renderer) ?? 0) {
@@ -131,12 +136,65 @@ struct SettingsModal: View {
             group("ic_hard_drive", "Файлы") {
                 HStack(spacing: 8) {
                     SecondaryButton(label: "Папка клиентов") { model.openClientsFolder() }
-                    SecondaryButton(label: "Переустановить Java") {
-                        dismiss()
-                        model.overlay.toast("Java для iOS ещё не готова")
+                    SecondaryButton(label: "Скрипт JIT") {
+                        if !Platform.openInFiles(JavaRuntimes.jitScriptFolder) {
+                            model.overlay.toast("Не удалось открыть «Файлы»")
+                        }
                     }
                 }
                 .frame(height: 34)
+            }
+        }
+    }
+
+    /** JIT state and the bundled runtimes, each can be started once per app launch to test it. */
+    private var javaGroup: some View {
+        let jit = model.jit
+        return group("ic_zap", "Java") {
+            HStack(spacing: 8) {
+                Circle()
+                    .fill(jit.enabled ? Theme.green : Theme.red)
+                    .frame(width: 8, height: 8)
+                Text(jit.title)
+                    .font(Theme.semibold(13))
+                    .foregroundStyle(Theme.text)
+                if !jit.details.isEmpty {
+                    Text(jit.details)
+                        .font(Theme.medium(12))
+                        .foregroundStyle(Theme.text3)
+                }
+            }
+            Text(jit.hint)
+                .font(Theme.regular(12))
+                .foregroundStyle(Theme.text3)
+                .fixedSize(horizontal: false, vertical: true)
+                .padding(.top, 6)
+            let runtimes = model.javaRuntimes
+            if runtimes.isEmpty {
+                Text("В этой сборке нет встроенной Java")
+                    .font(Theme.medium(12))
+                    .foregroundStyle(Theme.red)
+                    .padding(.top, 10)
+            }
+            ForEach(runtimes) { runtime in
+                HStack(spacing: 10) {
+                    Text(runtime.title)
+                        .font(Theme.semibold(13))
+                        .foregroundStyle(Theme.text)
+                    Text(runtime.version)
+                        .font(Theme.medium(12))
+                        .foregroundStyle(Theme.text3)
+                    Spacer(minLength: 0)
+                    SecondaryButton(label: "Проверить") {
+                        dismiss()
+                        model.probeJava(runtime)
+                    }
+                    .frame(width: 130, height: 32)
+                }
+                .padding(.horizontal, 12)
+                .frame(height: 44)
+                .box(Theme.field, radius: 9, border: Theme.fieldBorder)
+                .padding(.top, 8)
             }
         }
     }

@@ -31,6 +31,11 @@ xcrun simctl bootstatus "$UDID" -b
 xcrun simctl status_bar "$UDID" override --time 9:41 --batteryLevel 100 || true
 xcrun simctl install "$UDID" "$APP"
 
+# simctl saves the portrait framebuffer; the app is landscape, turn it upright
+upright() {
+    sips -r 270 "$1" >/dev/null
+}
+
 shot() {
     local name="$1"
     shift
@@ -38,6 +43,7 @@ shot() {
     xcrun simctl launch "$UDID" "$BUNDLE" "$@" >/dev/null
     sleep 5
     xcrun simctl io "$UDID" screenshot "$OUT/$name.png" >/dev/null
+    upright "$OUT/$name.png"
     echo "shot $name"
 }
 
@@ -45,6 +51,7 @@ shot() {
 xcrun simctl launch "$UDID" "$BUNDLE" >/dev/null
 sleep 8
 xcrun simctl io "$UDID" screenshot "$OUT/01-login.png" >/dev/null
+upright "$OUT/01-login.png"
 echo "shot 01-login"
 
 shot 02-home --demo
@@ -56,6 +63,8 @@ shot 07-progress --demo --screen progress
 shot 08-unavailable --demo --screen unavailable
 shot 09-mfa --demo --screen mfa
 shot 10-totp --demo --screen totp
+shot 11-java --demo --screen java
+shot 12-probe --demo --screen probe
 
 DATA=$(xcrun simctl get_app_container "$UDID" "$BUNDLE" data)
 cp "$DATA/Documents/logs/launcher.log" "$OUT/launcher.log" || echo "no app log"
