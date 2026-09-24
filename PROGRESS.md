@@ -18,11 +18,19 @@
    - Уже есть: вход (MFA/TOTP), профиль, выход, список серверов, `clientProfile` (GetClient), ошибки с русскими текстами, сессия в Keychain, кэш серверов, лог `Documents/logs/launcher.log`.
    - Тесты: `swift test`. Живой тест с выдуманной сессией проходит, сервер отвечает `unauthenticated`, значит TLS и gRPC работают.
 2. **CI:** `swift test` → XcodeGen → сборка под симулятор → скриншоты (`scripts/sim-screenshots.sh`) → неподписанный `HTS.ipa`.
-3. **Интерфейс, скопированный с Android** (коммит `01e35b2`, CI‑запуск `35965227231` на момент записи ещё шёл, результат **не проверен**).
+3. **Интерфейс, скопированный с Android** (коммит `01e35b2`, проверен скриншотами CI).
    - Ориентация только горизонтальная, полноэкранный режим, шрифт Inter, иконки из Android (`scripts/import_android_assets.py` → `App/Assets.xcassets/Icons`), иконка приложения.
    - Файлы: `App/Theme.swift`, `Components.swift`, `Modal.swift` (окна и тосты), `AuthScreen.swift`, `HomeScreen.swift`, `Windows.swift` (настройки, помощь, список модов), `AppModel.swift` (состояние, сценарий «Играть», `LoginFlow`), `Prefs.swift`, `Platform.swift` (шаринг, «Файлы», голова скина), `DeviceInfo.swift` (данные для `--demo`).
-   - Демо для скриншотов: `--demo --screen menu|settings|help|mods|progress|unavailable|mfa|totp`.
-   - «Играть» сейчас доходит до профиля клиента и показывает окно «Клиент недоступен на iOS».
+   - Демо для скриншотов: `--demo --screen menu|settings|java|probe|help|mods|progress|unavailable|mfa|totp`. Скриншоты поворачиваются `sips -r 270` (simctl снимает портретный буфер).
+4. **Java 8/17/25 и JIT из Amethyst‑iOS** (коммиты `4ac6067`…`CI: export check`, CI‑запуск `35970303659` зелёный, ipa 125 МБ; на телефоне **ещё не проверено**).
+   - CI: `scripts/pack-jre.sh` кладёт JRE из `assets.angelauramc.dev` в `HTS.app/java_runtimes/java-N-openjdk` (чистка как в Makefile Amethyst, кэш `jre-cache`), `ldid` подписывает dylib и приложение с `entitlements.sideload.xml`. Проверка платформы Mach‑O для iOS не нужна (в Amethyst она только для PLATFORM≠2). ipa растёт примерно на 111 МБ.
+   - `App/Native/HTSJava.{h,m}` + `App/HTS-Bridging-Header.h`, JNI‑заголовки в `App/Native/include` (jni.h из JDK 21, свой jni_md.h):
+     - JIT: `csops` → `CS_DEBUGGED`; флаги iOS 26 / зеркальный JIT / TXM (A12 без TXM, A13–A14/M1 с iOS 27, остальные с iOS 19); на TXM нужен ещё подключённый отладчик.
+     - `DeviceHasTXM` экспортирована: `libjvm` ищет её через `dlsym`, иначе читает `XNU_HAS_TXM` (ставим и её). Запросы `[JIT26]` к отладчику делает сама `libjvm`.
+     - На TXM перед стартом JVM: проверка «legacy»‑брейкпоинта, отправка `UniversalJIT26Extension.js`, `JIT26SetDetachAfterFirstBr(YES)` (как в Amethyst). Скрипты в `Resources/JIT`, `UniversalJIT26.js` при запуске копируется в `Documents/JIT` для StikDebug.
+     - Проверка: `JNI_CreateJavaVM` на своём потоке (8 МБ стека, поток потом паркуется), опции Amethyst (`DisablePrimordialThreadGuardPages`, `-UseCompressedClassPointers`, `MirrorMappedCodeCache` на iOS 26) + «Доп. аргументы JVM» из настроек, куча 256 МБ. Замеры: свойства, `Arrays.sort` 1 млн int × 6, `CompilationMXBean`. stdout/stderr → `Documents/logs/jvm.log`.
+     - Одна JVM на процесс: вторая версия только после перезапуска.
+   - Swift: `App/JavaRuntimes.swift` (список, выбор под клиент: 8 → 8, иначе ближайшая ≥, т.е. 21 → 25; `JITStatus`; `JavaProbeResult`). Настройки → Продвинутые → «Java». «Играть» показывает, какая Java пойдёт, и кнопку «Проверить Java». Метка `logs/jvm-probe.running`: если JVM уронила приложение, при следующем запуске окно с концом `jvm.log`.
 
 ## Уроки CI (уже наступали)
 
@@ -30,53 +38,18 @@
 - Нельзя передавать `-sdk iphoneos` или `-sdk iphonesimulator` в `xcodebuild` вместе с плагинами: не находятся `protoc-gen-*`. Платформу задаём только через `-destination`.
 - В `info.properties` XcodeGen ключи `CFBundleIdentifier`, `CFBundleExecutable` и другие надо прописывать явно.
 - Успех сборки проверяем по наличию `HTS.app/Info.plist`, а не только папки.
+- `grep -q` в пайпе под `pipefail` (bash в Actions) роняет шаг: писатель получает SIGPIPE. Сначала в файл, потом grep.
+- `Platform` — `@MainActor`; из `static let` вне главного актора его не трогать.
+- Генерическая сборка под симулятор собирает и x86_64: ассемблер arm64 закрывать `#if defined(__arm64__)`.
 
-## Текущая задача: встроить JRE 8/17/25 и JIT из Amethyst‑iOS
+## Следующие шаги
 
-Просьба владельца: «установка и встройка jre jit из amethyst, только сразу 8 17 25».
-
-### Что выяснено
-
-Источник: github.com/AngelAuraMC/Amethyst-iOS (GPL‑3.0). Копии нужных файлов лежат в `/tmp/amethyst/` (bash): `JavaLauncher.m`, `main.m`, `utils.m/.h`, `dyld_bypass_validation.m`, `Makefile`, entitlements.
-
-**JRE**
-- Адреса: `https://assets.angelauramc.dev/openjdk/ios-arm64/jre{8,17,21,25}-ios-aarch64.zip`. Внутри zip лежит `jre*.tar.xz`.
-- Уже скачаны в scratchpad прошлой сессии (`...\scratchpad\jre\jre{8,17,25}.zip`, 21–27 МБ каждый). Их может не оказаться, тогда скачать заново.
-- Amethyst кладёт их в бандл как `App.app/java_runtimes/java-N-openjdk`. Удаляет `ASSEMBLY_EXCEPTION, bin, include, jre, legal, LICENSE, man, THIRD_PARTY_README, lib/{ct.sym,jspawnhelper,libjsig.dylib,src.zip,tools.jar}`.
-- Для Mach‑O выполняется `METHOD_CHANGE_PLAT` (исправление тега платформы). Его ещё надо посмотреть в `Makefile`; в CI это, вероятно, `vtool`.
-
-**Запуск JVM** (`JavaLauncher.m`)
-- `dlopen` `lib/jli/libjli.dylib` (Java 8) или `lib/libjli.dylib` (11+), затем `JLI_Launch`.
-- Переменная окружения `HACK_IGNORE_START_ON_FIRST_THREAD=1`, JVM работает в отдельном потоке.
-- Флаги: `-XX:+UnlockExperimentalVMOptions -XX:+DisablePrimordialThreadGuardPages`, `-XX:-UseCompressedClassPointers` (без entitlement extended‑VA), `-XX:+MirrorMappedCodeCache` на iOS 26.
-- Перед запуском проверяют, что свободно достаточно виртуальной памяти.
-- `JLI_Launch` вызывает `exit()` при завершении JVM, приложение закрывается. Вторую JVM в том же процессе не создать.
-
-**JIT** (`utils.m`)
-- `isJITEnabled`: `csops` → флаг `CS_DEBUGGED`.
-- На iOS 26 или с TXM дополнительно нужен подключённый отладчик (`getppid() != 1`) и скрипт StikDebug.
-- Функции `JIT26*` — это `brk #0xf00d` с кодом в `x16`: 1 PrepareRegion, 2 SendScript, 3 DetachAfterFirstBr, 4 PrepareRegionForPatching.
-- Скрипты `Natives/resources/UniversalJIT26.js` и `UniversalJIT26Extension.js`.
-- `DeviceHasTXM` помечен `__exported`: JVM, видимо, ищет его через `dlsym`. **Проверить** строками `libjvm.dylib`, какие символы JVM ждёт от приложения (`DeviceHasTXM`, `JIT26*`).
-- `dyld_bypass_validation.m` нужен для загрузки неподписанных `.dylib` (JRE вне бандла, JNA, натив модов).
-
-**Entitlements** (`entitlements.sideload.xml`): `get-task-allow`, `extended-virtual-addressing`, `increased-memory-limit`. В Amethyst их вшивают через `ldid -S`. У нас подписи сейчас нет (`CODE_SIGNING_ALLOWED=NO`). Можно добавить `ldid` в CI.
-
-### План
-
-1. **CI:** скачать JRE 8/17/25, распаковать, почистить, исправить платформу, положить в `HTS.app/java_runtimes/`. Проверить размер ipa.
-2. **Нативная часть в приложении** (Objective‑C/C в `App/`, bridging header):
-   - перенести проверку JIT и флагов TXM, `JIT26*`, обход проверки dyld, `DeviceHasTXM` с экспортом;
-   - добавить загрузчик `libjli` / `libjvm`.
-3. **Проверка Java**: `JNI_CreateJavaVM` в процессе приложения.
-   - Прочитать `java.version` и `java.vm.info`, прогнать небольшой бенчмарк (заранее скомпилированный `Bench.class` через `DefineClass`), чтобы увидеть, что JIT работает.
-   - Одна JVM на процесс: для следующей версии нужен перезапуск приложения.
-   - Без JIT HotSpot не стартует даже с `-Xint` (шаблонный интерпретатор тоже генерирует код), поэтому без JIT показывать окно с инструкцией.
-4. **Интерфейс:** в «Настройки → Продвинутые» раздел «Java»: список 8/17/25 с версией из файла `release`, статус JIT/TXM, кнопки «Проверить».
-   - В «Играть» подбирать JRE по `javaMajor` (8/17/25; для 21 брать 25?) и проверять JIT.
-5. Потом: LWJGL и рендер под iOS, загрузка клиентов (BLAKE3/CDN из `ClientSync`), сам запуск игры.
+1. **Проверить на телефоне.** Тестовый iPhone XR (A12, TXM нет, iOS не больше 18; версия пока неизвестна). JIT: StikDebug на iOS 17.4+, SideStore/JitStreamer на iOS 16 и ниже. Ставим ipa через Sideloadly, включаем JIT, «Настройки → Продвинутые → Java → Проверить» для 8, 17, 25 (с перезапуском между ними). Смотреть `jvm.log` и `launcher.log` (Файлы → HTS → logs).
+   - Если не стартует: подписи dylib после пересборки сайдлоадером, `dyld_bypass_validation` (в Amethyst включается, когда TXM нет), память (у XR 3 ГБ).
+2. LWJGL и рендер под iOS (GL4ES/ANGLE поверх Metal), ввод, окно игры.
+3. Загрузка клиентов (BLAKE3/CDN, как `ClientSync` на Android), сам запуск через `JLI_Launch` или свою точку входа.
 
 ### Открытые вопросы
 
-- Какой iPhone и какая iOS у друга (от этого зависит способ JIT: StikDebug или скрипт для TXM на iOS 26).
+- Версия iOS на XR (от неё способ JIT).
 - Лицензия: код Amethyst под GPL‑3.0. Для личного использования проблем нет, при распространении нужно открыть исходники.
