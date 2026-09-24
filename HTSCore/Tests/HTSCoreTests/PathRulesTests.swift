@@ -28,7 +28,7 @@ final class PathRulesTests: XCTestCase {
     }
 
     func testNormalize() {
-        XCTAssertEqual(PathRules.normalize("\mods\a.jar"), "mods/a.jar")
+        XCTAssertEqual(PathRules.normalize(#"\mods\a.jar"#), "mods/a.jar")
         XCTAssertNil(PathRules.normalize("mods/../../etc/passwd"))
         XCTAssertNil(PathRules.normalize(""))
         XCTAssertNil(PathRules.normalize("a//b"))
