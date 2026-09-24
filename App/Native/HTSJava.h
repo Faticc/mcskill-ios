@@ -53,7 +53,7 @@ typedef NS_OPTIONS(uint32_t, HTSJITFlags) {
                   args:(NSArray<NSString *> *)args
            environment:(NSDictionary<NSString *, NSString *> *)environment
                    log:(NSString *)logPath
-                 error:(NSError **)error;
+                 error:(NSError **)error NS_SWIFT_NAME(launch(javaHome:heapMb:jvmArgs:mainClass:args:environment:log:));
 
 @end
 

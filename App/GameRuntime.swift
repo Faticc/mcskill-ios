@@ -63,7 +63,7 @@ enum GameRuntime {
         let classpath = (jars(in: lwjglDir) + [gameDir.appendingPathComponent("tests/gltest.jar").path])
             .joined(separator: ":")
         AppLog.info("GL test on \(runtime.title)")
-        try HTSJava.launchJavaHome(runtime.home.path, heapMb: 256,
+        try HTSJava.launch(javaHome: runtime.home.path, heapMb: 256,
                                    jvmArgs: ["-Djava.class.path=\(classpath)"] + lwjglJvmArgs,
                                    mainClass: "HtsGLTest", args: [glTestReport.path],
                                    environment: environment, log: JavaRuntimes.logURL.path)

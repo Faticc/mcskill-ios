@@ -65,6 +65,7 @@ shot 09-mfa --demo --screen mfa
 shot 10-totp --demo --screen totp
 shot 11-java --demo --screen java
 shot 12-probe --demo --screen probe
+shot 13-sync --demo --screen sync
 
 DATA=$(xcrun simctl get_app_container "$UDID" "$BUNDLE" data)
 cp "$DATA/Documents/logs/launcher.log" "$OUT/launcher.log" || echo "no app log"

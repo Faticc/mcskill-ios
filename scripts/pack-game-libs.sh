@@ -2,15 +2,17 @@
 # Lays out what the game runs on inside <HTS.app> (see App/GameRuntime.swift):
 #   Frameworks/ — ANGLE (libEGL/libGLESv2 frameworks), gl4es and OpenAL from Amethyst-iOS at a pinned
 #                 commit, LWJGL 3.4.1 natives (release deps-1), our SDL3 (scripts/build-sdl.sh)
-#   game/lwjgl-3.4.1/ — the LWJGL jars built with those natives; game/tests/gltest.jar
+#   game/lwjgl-3.4.1/ — the LWJGL jars built with those natives; game/hts-lwjgl-patch.jar (CI build of
+#   lwjgl-patch/), MioLibPatcher.jar and the log4j config (game/ of this repo); game/tests/gltest.jar
 # With "simulator" the prebuilt Mach-O files are retagged for the simulator and ad-hoc signed.
-# Usage: scripts/pack-game-libs.sh <HTS.app> <cache dir> <libSDL3.dylib> <gltest.jar> [simulator]
+# Usage: scripts/pack-game-libs.sh <HTS.app> <cache dir> <libSDL3.dylib> <dir with gltest.jar, hts-lwjgl-patch.jar> [simulator]
 set -euo pipefail
 
 APP="$1"
 CACHE="$2"
 SDL="$3"
-TESTJAR="$4"
+BUILT="$4"
+ROOT=$(cd "$(dirname "$0")/.." && pwd)
 TARGET="${5:-device}"
 AMETHYST=9212a1894865e7ac0466029e25ddb0d895544c76
 RAW="https://github.com/AngelAuraMC/Amethyst-iOS/raw/$AMETHYST/Natives/resources/Frameworks"
@@ -36,7 +38,9 @@ cp "$work"/natives/*.dylib "$FW/"
 cp "$work"/jars/*.jar "$GAME/lwjgl-3.4.1/"
 rm -rf "$work"
 cp "$SDL" "$FW/libSDL3.dylib"
-cp "$TESTJAR" "$GAME/tests/gltest.jar"
+cp "$BUILT/gltest.jar" "$GAME/tests/gltest.jar"
+cp "$BUILT/hts-lwjgl-patch.jar" "$GAME/"
+cp "$ROOT"/game/* "$GAME/"
 
 if [ "$TARGET" = simulator ]; then
     while IFS= read -r -d '' f; do

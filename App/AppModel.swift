@@ -1,4 +1,5 @@
 import HTSCore
+import UIKit
 import SwiftUI
 
 /**
@@ -198,10 +199,10 @@ final class AppModel: ObservableObject {
                 } else {
                     profile = try await McSkillAPI.shared.clientProfile(id: server.id, session: current.id)
                 }
-                AppLog.info("Profile \(server.id): java \(profile.javaVersion), dir \(profile.clientDir)")
+                AppLog.info("Profile \(server.id): java \(profile.javaVersion), dir \(profile.clientDir), main \(profile.mainClass)")
                 bar = .idle
                 refreshJIT()
-                javaCheck(server, profile)
+                startGame(server, profile, session: current)
             } catch {
                 bar = .idle
                 let e = McSkillError.from(error)
@@ -220,8 +221,147 @@ final class AppModel: ObservableObject {
         bar = .idle
     }
 
-    /** The game itself doesn't start on iOS yet: what the client would run on, and a way to test it. */
-    private func javaCheck(_ server: ServerInfo, _ profile: ClientProfileInfo) {
+    /**
+     * What has to hold before files are synced: a bundled Java for the client, a kind of client
+     * that runs on iOS so far, JIT, the game libraries in this build.
+     */
+    private func startGame(_ server: ServerInfo, _ profile: ClientProfileInfo, session: McSkillSession) {
+        guard JavaRuntimes.pick(for: profile.javaMajor, in: javaRuntimes) != nil else {
+            javaCheck(server, profile)
+            return
+        }
+        // So far: Forge 1.7.10 with lwjgl3ify 3 (RFB's MainStartOnFirstThread), whose window is SDL
+        guard profile.mainClass.hasSuffix("MainStartOnFirstThread") else {
+            javaCheck(server, profile, reason: "На iOS пока запускаются клиенты 1.7.10 на lwjgl3ify 3 (HiTech и похожие). \(server.title) \(server.version) устроен иначе, его очередь следующая.")
+            return
+        }
+        if demo {
+            javaCheck(server, profile)
+            return
+        }
+        guard jit.enabled else {
+            showError("JIT выключен", jit.hint)
+            return
+        }
+        guard GameRuntime.installed else {
+            showError("Нет библиотек игры", "В этой сборке приложения нет SDL, ANGLE и LWJGL для iOS.")
+            return
+        }
+        sync(server, profile, session: session)
+    }
+
+    private func sync(_ server: ServerInfo, _ profile: ClientProfileInfo, session: McSkillSession) {
+        let sync = ClientSync(clientId: server.id, session: session.id, fullCheck: Prefs.fullCheck(server.id))
+        bar = .progress(title: "Проверка файлов", detail: "Получение списка файлов", right: "", fraction: nil,
+                        cancellable: true)
+        work = Task {
+            let poll = Task { @MainActor in
+                var last: (Date, Int64)?
+                while !Task.isCancelled {
+                    show(sync.progress.snapshot, &last)
+                    try? await Task.sleep(nanoseconds: 500_000_000)
+                }
+            }
+            defer { poll.cancel() }
+            do {
+                let result = try await sync.run(profile: profile)
+                Prefs.setFullCheck(server.id, false)
+                poll.cancel()
+                launch(server, result, session: session)
+            } catch is CancellationError {
+                bar = .idle
+            } catch SyncError.diskSpace(let download, let required, let available) {
+                bar = .idle
+                showError("Недостаточно места", "Для обновления нужно \(Self.megabytes(required)) (из них загрузка \(Self.megabytes(download))), свободно \(Self.megabytes(available)).")
+            } catch {
+                bar = .idle
+                if Task.isCancelled { return }
+                AppLog.error("Sync failed: \(error.localizedDescription)")
+                showError("Не удалось обновить файлы", (error as? SyncError)?.localizedDescription ?? McSkillError.from(error).localizedDescription) {
+                    self.sync(server, profile, session: session)
+                }
+            }
+        }
+    }
+
+    private func show(_ p: SyncProgress.Snapshot, _ last: inout (Date, Int64)?) {
+        switch p.phase {
+        case .preparing:
+            bar = .progress(title: "Проверка файлов", detail: "Получение списка файлов", right: "", fraction: nil,
+                            cancellable: true)
+        case .checking:
+            bar = .progress(title: "Проверка файлов", detail: "Проверено \(p.checked) из \(p.toCheck)", right: "",
+                            fraction: p.toCheck > 0 ? Double(p.checked) / Double(p.toCheck) : nil, cancellable: true)
+        case .downloading:
+            let now = Date()
+            var right = ""
+            if let (time, bytes) = last, now.timeIntervalSince(time) > 0.2 {
+                let speed = Double(p.downloadedBytes - bytes) / now.timeIntervalSince(time)
+                if speed > 0 {
+                    let left = Double(p.bytesToDownload - p.downloadedBytes) / speed
+                    right = String(format: "%.1f МБ/с · осталось %@", speed / 1_048_576, Self.duration(left))
+                }
+            }
+            last = (now, p.downloadedBytes)
+            bar = .progress(title: "Обновление файлов",
+                            detail: "Загружено \(Self.megabytes(p.downloadedBytes)) из \(Self.megabytes(p.bytesToDownload)) · \(p.downloadedFiles) / \(p.filesToDownload) файлов",
+                            right: right,
+                            fraction: p.bytesToDownload > 0 ? Double(p.downloadedBytes) / Double(p.bytesToDownload) : nil,
+                            cancellable: true)
+        case .deleting, .done:
+            bar = .progress(title: "Обновление файлов", detail: "Удаление лишних файлов", right: "", fraction: nil,
+                            cancellable: false)
+        }
+    }
+
+    private static func megabytes(_ bytes: Int64) -> String {
+        String(format: "%.1f МБ", Double(bytes) / 1_048_576)
+    }
+
+    private static func duration(_ seconds: Double) -> String {
+        guard seconds.isFinite, seconds > 0 else { return "—" }
+        let s = Int(seconds)
+        return s >= 3600 ? "\(s / 3600)ч \(s % 3600 / 60)м" : s >= 60 ? "\(s / 60)м \(s % 60)с" : "\(s)с"
+    }
+
+    /** Heap: the setting, or in auto mode the profile's recommendation within half the RAM. */
+    private func heapMb(_ profile: ClientProfileInfo) -> Int {
+        if !Prefs.memoryAuto { return LaunchSettings.load().ramMb }
+        let physical = Int(ProcessInfo.processInfo.physicalMemory >> 20)
+        let recommended = ClientProfileInfo.megabytes(profile.recommendedRam)
+        return max(768, min(recommended > 0 ? recommended : 2048, physical / 2))
+    }
+
+    private func launch(_ server: ServerInfo, _ result: ClientSync.Result, session: McSkillSession) {
+        guard let runtime = JavaRuntimes.pick(for: result.profile.javaMajor, in: javaRuntimes) else { return }
+        let screen = UIScreen.main.bounds.size
+        let settings = LaunchSettings.load()
+        let plan: LaunchPlan
+        do {
+            plan = try GameLauncher.plan(profile: result.profile, pack: result.pack, session: session, runtime: runtime,
+                                         heapMb: heapMb(result.profile),
+                                         extraJvmArgs: settings.extraJvmArgs.split(separator: " ").map(String.init),
+                                         width: Int(max(screen.width, screen.height)),
+                                         height: Int(min(screen.width, screen.height)))
+        } catch {
+            bar = .idle
+            javaCheck(server, result.profile, reason: error.localizedDescription)
+            return
+        }
+        bar = .progress(title: "Запуск \(server.title)", detail: "\(runtime.title), \(plan.heapMb) МБ. Загрузка модов займёт пару минут",
+                        right: "", fraction: nil, cancellable: false)
+        Task {
+            let outcome: Result<Void, Error> = await Task.detached { Result { try GameLauncher.launch(plan) } }.value
+            if case .failure(let error) = outcome {
+                bar = .idle
+                AppLog.error("Launch failed: \(error.localizedDescription)")
+                showJavaFailure("Игра не запустилась", error.localizedDescription)
+            }
+        }
+    }
+
+    /** What the client would run on and a way to test that Java, when the game can't start. */
+    private func javaCheck(_ server: ServerInfo, _ profile: ClientProfileInfo, reason: String? = nil) {
         let java = profile.javaMajor
         let runtimes = javaRuntimes
         guard let runtime = JavaRuntimes.pick(for: java, in: runtimes) else {
@@ -238,7 +378,7 @@ final class AppModel: ObservableObject {
         let jit = self.jit
         overlay.show(width: 460) {
             ModalCard("Клиент пока не запускается") {
-                ModalText("Запуск Minecraft на iOS ещё в работе. \(server.title) \(server.version) пойдёт на \(runtime.title) (\(runtime.version)), она уже встроена. Можно проверить, заводится ли она на этом iPhone.")
+                ModalText(reason ?? "Запуск Minecraft на iOS ещё в работе. \(server.title) \(server.version) пойдёт на \(runtime.title) (\(runtime.version)), она уже встроена. Можно проверить, заводится ли она на этом iPhone.")
                 ModalPair(label: "Java клиента", value: "\(java) → \(runtime.title)")
                 ModalPair(label: "JIT", value: jit.title, color: jit.enabled ? Theme.green : Theme.red)
                 if !jit.enabled {
@@ -415,6 +555,11 @@ final class AppModel: ObservableObject {
             case "help": openHelp(server)
             case "mods": openMods(server)
             case "unavailable": javaCheck(server, Demo.profile(server))
+            case "sync":
+                var last: (Date, Int64)? = (Date().addingTimeInterval(-1), 100 << 20)
+                show(SyncProgress.Snapshot(phase: .downloading, checked: 0, toCheck: 0, downloadedFiles: 812,
+                                           filesToDownload: 2410, downloadedBytes: 126 << 20, bytesToDownload: 402 << 20),
+                     &last)
             default: break
             }
         }

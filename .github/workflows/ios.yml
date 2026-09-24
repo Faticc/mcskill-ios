@@ -1,7 +1,9 @@
 name: iOS
 
 on:
+  # Branches only: tags (release deps-N) must not start a build
   push:
+    branches: ['**']
   workflow_dispatch:
 
 jobs:
@@ -53,6 +55,11 @@ jobs:
           tar -xzf game-cache/lwjgl-3.4.1-ios.tar.gz -C build/gltest/lwjgl
           javac --release 17 -cp "$(ls build/gltest/lwjgl/jars/*.jar | paste -sd: -)" -d build/gltest/classes tests/gltest/HtsGLTest.java
           jar cf build/gltest/gltest.jar -C build/gltest/classes .
+          # SDLVideo with the HTS hooks (lwjgl-patch/README.md), first on the classpath of SDL packs
+          [ -s game-cache/jspecify-1.0.0.jar ] || curl -fsSL -o game-cache/jspecify-1.0.0.jar https://repo1.maven.org/maven2/org/jspecify/jspecify/1.0.0/jspecify-1.0.0.jar
+          mkdir -p build/gltest/patch
+          javac --release 8 -encoding UTF-8 -nowarn -cp "$(ls build/gltest/lwjgl/jars/*.jar | paste -sd: -):game-cache/jspecify-1.0.0.jar" -d build/gltest/patch $(find lwjgl-patch/src -name '*.java')
+          jar cf build/gltest/hts-lwjgl-patch.jar -C build/gltest/patch .
 
       - name: Generate Xcode project
         run: xcodegen generate
@@ -93,7 +100,7 @@ jobs:
           nm -gU Payload/HTS.app/HTS > exports.txt
           grep ' _DeviceHasTXM$' exports.txt || { echo "DeviceHasTXM not exported"; exit 1; }
           bash scripts/pack-jre.sh Payload/HTS.app jre-cache
-          bash scripts/pack-game-libs.sh Payload/HTS.app game-cache build/sdl-out/device/libSDL3.dylib build/gltest/gltest.jar
+          bash scripts/pack-game-libs.sh Payload/HTS.app game-cache build/sdl-out/device/libSDL3.dylib build/gltest
           # Ad-hoc signatures and entitlements (as Amethyst): runtimes and libraries first, then the app
           find Payload/HTS.app/java_runtimes Payload/HTS.app/Frameworks -type f | while read -r f; do
               if file -b "$f" | grep -q '^Mach-O'; then ldid -S "$f"; fi
@@ -111,7 +118,7 @@ jobs:
         run: |
           SIMAPP=build/sim/Build/Products/Debug-iphonesimulator/HTS.app
           bash scripts/pack-jre.sh "$SIMAPP" jre-cache simulator
-          bash scripts/pack-game-libs.sh "$SIMAPP" game-cache build/sdl-out/simulator/libSDL3.dylib build/gltest/gltest.jar simulator
+          bash scripts/pack-game-libs.sh "$SIMAPP" game-cache build/sdl-out/simulator/libSDL3.dylib build/gltest simulator
           codesign -f -s - "$SIMAPP"
           failed=0
           bash scripts/sim-java-probe.sh "$SIMAPP" java-probe || failed=1
