@@ -32,24 +32,41 @@
      - Одна JVM на процесс: вторая версия только после перезапуска.
    - Swift: `App/JavaRuntimes.swift` (список, выбор под клиент: 8 → 8, иначе ближайшая ≥, т.е. 21 → 25; `JITStatus`; `JavaProbeResult`). Настройки → Продвинутые → «Java». «Играть» показывает, какая Java пойдёт, и кнопку «Проверить Java». Метка `logs/jvm-probe.running`: если JVM уронила приложение, при следующем запуске окно с концом `jvm.log`.
 
+5. **Java в симуляторе CI** (шаг «Java and rendering in the simulator», артефакт `java-probe`): `pack-jre.sh … simulator` меняет тег платформы JRE на 7 (`vtool`) и подписывает ad-hoc, `scripts/sim-java-probe.sh` запускает приложение с `--probe-java 8|17|25`. Итог пишется в `logs/jvm-probe.json`. Все три JVM стартуют (72–159 мс), mixed mode, JIT через зеркальный кэш iOS 26 (`[JIT26] mapping at RW/RX`). Это не проверяет `csops`, StikDebug, TXM и лимиты памяти настоящего iPhone.
+6. **Рендер: SDL3 + ANGLE + gl4es + LWJGL 3.4.1** (коммиты `Render path…` и дальше).
+   - `sdl/SDL_uikit_hts.m` + `scripts/build-sdl.sh`: SDL 3.4.16 под iOS (device и simulator, кэш `build/sdl-out`). Файл встраивается в бэкенд uikit (хук в конце `UIKit_CreateDevice`):
+     - всё, что трогает UIKit (окно, текстовый ввод, Metal‑view, экраны), выполняется в главном потоке через `dispatch_sync`; `PumpEvents` вне главного потока runloop не крутит;
+     - GL через EGL ANGLE на `CAMetalLayer` Metal‑view окна (как `gl_bridge.m` у Amethyst). Конфигурация перебирается от ES3/24/8 к ES2/0/0 и пишется в stdout (`[HTS] EGL …`);
+     - экспорт `HTS_SendKey/Text/MouseMotion/MouseButton/MouseWheel`, `HTS_RelativeMouse` для оверлея управления (внутренние вызовы SDL, чтобы его состояние клавиш и мыши было верным).
+   - `scripts/pack-game-libs.sh`: ANGLE (`libEGL/libGLESv2.framework`), `libgl4es_114.dylib`, `libopenal.dylib` из Amethyst‑iOS (коммит `9212a18`), LWJGL 3.4.1 (натив + jar из одной сборки, релиз **`deps-1`** этого репо, взято из артефакта AngelAuraMC/lwjgl3 `wip/rebase_3.4.1`), наш SDL3 → `HTS.app/Frameworks`; jar → `HTS.app/game/lwjgl-3.4.1`; `hts-lwjgl-patch.jar` (CI собирает `lwjgl-patch/`), `MioLibPatcher.jar`, `log4j-rce-patch-1.7.xml` (папка `game/`) → `HTS.app/game`.
+   - `HTSJava launch(javaHome:…mainClass:…)`: JVM + `main(String[])` на своём потоке (16 МБ стека), переменные окружения, `SDL_SetMainReady` по `HTS_SDL_LIBRARY`. `App/GameRuntime.swift`: пути, опции LWJGL, env gl4es.
+   - `tests/gltest/HtsGLTest.java` (`--gltest`, скрипт `scripts/sim-gltest.sh`): окно SDL, GL 2.1 через gl4es, треугольник, отчёт `logs/gltest.json`, скриншот `gltest.png`.
+   - **Состояние на прогоне `35980389631`:** SDL стартует (`uikit`), окно создаётся из потока Java, gl4es грузится и видит ANGLE (свой контекст ES2 создал), оверлей управления появляется над окном SDL. Падало на `eglChooseConfig` (ни одной конфигурации ES3/24/8 + PBUFFER). Исправление с перебором конфигураций закоммичено, но **ещё не прогонялось**: закончились минуты Actions.
+   - Форк LWJGL от Amethyst в `Library.<clinit>` делает `System.load($BUNDLE_PATH/AngelAuraAmethyst)` (мост GLFW Pojav); для SDL‑паков не нужно, ошибка перехватывается.
+7. **Синхронизация клиентов** (`HTSCore/…/ClientSync.swift`, `Blake3.swift`): порт Android `ClientSync` (правила путей лаунчера, `HashIndex` по размеру и mtime, режимы целостности, CDN `base/hh/hash` с докачкой `.part` и хешем на лету, узел‑замена, gRPC пачками, удаление лишнего, проверка места), `PatchLedger` (правленые конфиги не перекачиваются). BLAKE3 сверен с официальными векторами в `swift test`. Папки: `Documents/clients/<client_dir>`, `Documents/assets/<assets_dir>`, записи в `Documents/installed/<client_dir>`. **С настоящим сервером ещё не запускалось.**
+8. **Запуск пака** (`App/GameLauncher.swift`): порт `LaunchSpec`+`JvmLauncher` для SDL‑паков (Forge 1.7.10 + lwjgl3ify 3, главный класс `…MainStartOnFirstThread`: HiTech, TechnoMagic, Galaxy). Аргументы JVM из профиля без ПК‑флагов (+ `-XX:+UseCompactObjectHeaders` выкидывается: без extended VA нет сжатых указателей классов), `--add-opens x` склеивается в `--add-opens=x`, API‑аргументы McSkill, classpath: патч → LWJGL 3.4.1 iOS → jar пака без заменённых модулей LWJGL и десктопных нативов; аргументы аккаунта как `play.py`; env `HTS_GL_PROFILE=es`, `MAJOR=3`, `HTS_GL_PROC_LIB=gl4es`; правки `lwjgl3ify.cfg` (sharedContext=false), `splash.properties`, ALS, FpsReducer, optional. NeoForge и GLFW‑паки (Oneblock3) показывают окно «пока не запускается».
+   - «Играть»: профиль → проверки (Java, тип пака, JIT, библиотеки) → синхронизация с прогрессом и отменой → запуск → оверлей управления.
+9. **Управление** (`App/Native/HTSControls.m`): окно над окном SDL (ищется по `SDL_uikitviewcontroller`): стик WASD, прыжок, присед‑переключатель, Esc/E/T/Q/F5, экранная клавиатура (скрытый `UITextField` → `HTS_SendText`, Backspace/Enter), хотбар по GUI‑масштабу из `options.txt`. В мире: ведение = камера (относительная мышь), короткий тап = ПКМ, удержание 0,3 с = ЛКМ (ломать). В меню: касание = курсор + ЛКМ.
+
 ## Уроки CI (уже наступали)
 
 - В цели SwiftPM, где только `.proto`, нужен хотя бы один `.swift`, иначе SwiftPM её пропускает (`McSkillProto.swift`).
 - Нельзя передавать `-sdk iphoneos` или `-sdk iphonesimulator` в `xcodebuild` вместе с плагинами: не находятся `protoc-gen-*`. Платформу задаём только через `-destination`.
 - В `info.properties` XcodeGen ключи `CFBundleIdentifier`, `CFBundleExecutable` и другие надо прописывать явно.
-- Успех сборки проверяем по наличию `HTS.app/Info.plist`, а не только папки.
+- Успех сборки проверяем по наличию исполняемого `HTS.app/HTS` (а не `Info.plist`: он появляется до линковки).
 - `grep -q` в пайпе под `pipefail` (bash в Actions) роняет шаг: писатель получает SIGPIPE. Сначала в файл, потом grep.
 - `Platform` — `@MainActor`; из `static let` вне главного актора его не трогать.
 - Генерическая сборка под симулятор собирает и x86_64: ассемблер arm64 закрывать `#if defined(__arm64__)`.
-
-5. **Java в симуляторе CI** (шаг «Java in the simulator», артефакт `java-probe`): `pack-jre.sh … simulator` меняет тег платформы JRE на 7 (`vtool`) и подписывает ad-hoc, `scripts/sim-java-probe.sh` запускает приложение с `--probe-java 8|17|25`. Итог пишется в `logs/jvm-probe.json`. Первый прогон (`35972404577`): все три JVM стартуют (72–159 мс), mixed mode, JIT через зеркальный кэш iOS 26 (`[JIT26] mapping at RW/RX`), сортировка ~60–70 мс. Это не проверяет `csops`, StikDebug, TXM и лимиты памяти настоящего iPhone.
+- Swift сам переименовывает методы Objective‑C, убирая слово из имени класса (`launchJavaHome` → `launchHome`): имена закреплять `NS_SWIFT_NAME`. `int` в заголовке = `Int32` в Swift.
+- Workflow запускается только на ветки: тег от `gh release create` иначе стартует лишнюю сборку.
+- **Минуты:** репозиторий приватный, macOS‑минуты идут ×10. 24.09 после ~20 прогонов лимит кончился («spending limit needs to be increased»). Коммиты собирать крупнее.
+- Bash‑heredoc в этом окружении портит `\\` → файлы с обратными слэшами писать через Write/Edit.
 
 ## Следующие шаги
 
-1. **Проверить на телефоне.** Тестовый iPhone XR (A12, TXM нет, iOS не больше 18; версия пока неизвестна). JIT: StikDebug на iOS 17.4+, SideStore/JitStreamer на iOS 16 и ниже. Ставим ipa через Sideloadly, включаем JIT, «Настройки → Продвинутые → Java → Проверить» для 8, 17, 25 (с перезапуском между ними). Смотреть `jvm.log` и `launcher.log` (Файлы → HTS → logs).
-   - Если не стартует: подписи dylib после пересборки сайдлоадером, `dyld_bypass_validation` (в Amethyst включается, когда TXM нет), память (у XR 3 ГБ).
-2. LWJGL и рендер под iOS (GL4ES/ANGLE поверх Metal), ввод, окно игры.
-3. Загрузка клиентов (BLAKE3/CDN, как `ClientSync` на Android), сам запуск через `JLI_Launch` или свою точку входа.
+1. **Вернуть CI** (решение владельца): сделать репозиторий публичным (минуты бесплатны), поднять лимит расходов или ждать нового месяца. Первый же прогон проверит перебор EGL‑конфигураций: смотреть `java-probe/gltest.json`, `gltest-jvm.log` (`[HTS] EGL …`), `gltest.png`.
+2. Когда треугольник нарисуется в симуляторе: проверить на XR (Sideloadly, JIT через StikDebug): «Проверить Java», затем «Играть» на HiTech (1.7.10, Java 25). Логи: Файлы → HTS → logs (`launcher.log`, `jvm.log`).
+3. Дальше по результатам: HtsGLBaton/сплэш, темп кадров (`HtsSurface` без Android‑файла), звук (OpenAL из Amethyst), клавиатура чата, GLFW‑паки через Pojav‑GLFW Amethyst (мост `AngelAuraAmethyst`), NeoForge.
 
 ### Открытые вопросы
 
