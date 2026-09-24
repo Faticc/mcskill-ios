@@ -35,6 +35,7 @@ jobs:
             -skipPackagePluginValidation -skipMacroValidation \
             build 2>&1 | tee sim-build.log | grep -E "error:|warning: .*HTS|BUILD" || true
           test -d build/sim/Build/Products/Debug-iphonesimulator/HTS.app
+          plutil -p build/sim/Build/Products/Debug-iphonesimulator/HTS.app/Info.plist
 
       - name: Simulator screenshots
         run: bash scripts/sim-screenshots.sh build/sim/Build/Products/Debug-iphonesimulator/HTS.app screenshots

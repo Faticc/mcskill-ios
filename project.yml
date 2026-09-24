@@ -21,6 +21,12 @@ targets:
     info:
       path: App/Info.plist
       properties:
+        CFBundleIdentifier: $(PRODUCT_BUNDLE_IDENTIFIER)
+        CFBundleExecutable: $(EXECUTABLE_NAME)
+        CFBundleName: $(PRODUCT_NAME)
+        CFBundlePackageType: $(PRODUCT_BUNDLE_PACKAGE_TYPE)
+        CFBundleInfoDictionaryVersion: "6.0"
+        LSRequiresIPhoneOS: true
         CFBundleDisplayName: HTS
         CFBundleShortVersionString: "0.1.0"
         CFBundleVersion: "1"
