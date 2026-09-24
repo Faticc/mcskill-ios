@@ -22,6 +22,7 @@
 #import <QuartzCore/QuartzCore.h>
 #include <dlfcn.h>
 #include <pthread.h>
+#include <stdio.h>
 
 // MARK: - main thread
 
@@ -329,6 +330,64 @@ static SDL_FunctionPointer HTS_GL_GetProcAddress(SDL_VideoDevice *_this, const c
     return (SDL_FunctionPointer)fn;
 }
 
+/** ES version of the chosen config, for the context (3 when the config allows it). */
+static int chosen_es = 2;
+
+/**
+ * The first config that fits, from what the game asked for down to the bare minimum: ANGLE's
+ * config list differs between Metal on a device and in the simulator. The list goes to stdout
+ * (jvm.log) once.
+ */
+static EGLConfig HTS_ChooseConfig(SDL_VideoDevice *_this)
+{
+    static bool logged;
+    if (!logged) {
+        logged = true;
+        const char *(*query)(EGLDisplay, EGLint) = dlsym(egl.lib, "eglQueryString");
+        EGLBoolean (*getConfigs)(EGLDisplay, EGLConfig *, EGLint, EGLint *) = dlsym(egl.lib, "eglGetConfigs");
+        EGLint total = 0;
+        if (getConfigs) getConfigs(egl.display, NULL, 0, &total);
+        printf("[HTS] EGL %s, %s, APIs %s, %d configs\n",
+               query ? query(egl.display, 0x3054) : "?", query ? query(egl.display, 0x3053) : "?",
+               query ? query(egl.display, 0x308D) : "?", (int)total);
+    }
+    const int want_es3 = _this->gl_config.major_version >= 3;
+    const int depth = SDL_max(_this->gl_config.depth_size, 16);
+    struct { int es3, depth, stencil, alpha; } tries[] = {
+        { want_es3, SDL_max(depth, 24), 8, 8 },
+        { want_es3, SDL_max(depth, 24), 0, 8 },
+        { want_es3, 16, 0, 0 },
+        { 0, 24, 8, 8 },
+        { 0, 24, 0, 0 },
+        { 0, 16, 0, 0 },
+        { 0, 0, 0, 0 },
+    };
+    for (size_t i = 0; i < SDL_arraysize(tries); i++) {
+        const EGLint attribs[] = {
+            EGL_RED_SIZE, 8,
+            EGL_GREEN_SIZE, 8,
+            EGL_BLUE_SIZE, 8,
+            EGL_ALPHA_SIZE, tries[i].alpha,
+            EGL_DEPTH_SIZE, tries[i].depth,
+            EGL_STENCIL_SIZE, tries[i].stencil,
+            EGL_SURFACE_TYPE, EGL_WINDOW_BIT,
+            EGL_RENDERABLE_TYPE, tries[i].es3 ? EGL_OPENGL_ES3_BIT : EGL_OPENGL_ES2_BIT,
+            EGL_NONE
+        };
+        EGLConfig config = NULL;
+        EGLint count = 0;
+        if (egl.ChooseConfig(egl.display, attribs, &config, 1, &count) && count > 0) {
+            chosen_es = tries[i].es3 ? 3 : 2;
+            printf("[HTS] EGL config: ES%d, depth %d, stencil %d, alpha %d\n", chosen_es, tries[i].depth,
+                   tries[i].stencil, tries[i].alpha);
+            fflush(stdout);
+            return config;
+        }
+    }
+    SDL_SetError("HTS: eglChooseConfig found nothing: 0x%x", egl.GetError());
+    return NULL;
+}
+
 static HTS_GLWindow *HTS_FindGLWindow(SDL_Window *window)
 {
     for (HTS_GLWindow *w = gl_windows; w; w = w->next) {
@@ -345,22 +404,8 @@ static HTS_GLWindow *HTS_GetGLWindow(SDL_VideoDevice *_this, SDL_Window *window)
     if (w) {
         return w;
     }
-    const int es3 = _this->gl_config.major_version >= 3;
-    const EGLint attribs[] = {
-        EGL_RED_SIZE, SDL_max(_this->gl_config.red_size, 8),
-        EGL_GREEN_SIZE, SDL_max(_this->gl_config.green_size, 8),
-        EGL_BLUE_SIZE, SDL_max(_this->gl_config.blue_size, 8),
-        EGL_ALPHA_SIZE, SDL_max(_this->gl_config.alpha_size, 8),
-        EGL_DEPTH_SIZE, SDL_max(_this->gl_config.depth_size, 24),
-        EGL_STENCIL_SIZE, SDL_max(_this->gl_config.stencil_size, 8),
-        EGL_SURFACE_TYPE, EGL_WINDOW_BIT | EGL_PBUFFER_BIT,
-        EGL_RENDERABLE_TYPE, es3 ? EGL_OPENGL_ES3_BIT : EGL_OPENGL_ES2_BIT,
-        EGL_NONE
-    };
-    EGLConfig config = NULL;
-    EGLint count = 0;
-    if (!egl.ChooseConfig(egl.display, attribs, &config, 1, &count) || count < 1) {
-        SDL_SetError("HTS: eglChooseConfig found nothing: 0x%x", egl.GetError());
+    EGLConfig config = HTS_ChooseConfig(_this);
+    if (!config) {
         return NULL;
     }
     SDL_MetalView view = _this->Metal_CreateView(_this, window);
@@ -394,7 +439,7 @@ static SDL_GLContext HTS_GL_CreateContext(SDL_VideoDevice *_this, SDL_Window *wi
         return NULL;
     }
     const EGLint ctxAttribs[] = {
-        EGL_CONTEXT_CLIENT_VERSION, _this->gl_config.major_version >= 3 ? 3 : 2,
+        EGL_CONTEXT_CLIENT_VERSION, chosen_es,
         EGL_NONE
     };
     EGLContext share = _this->gl_config.share_with_current_context ? (EGLContext)SDL_GL_GetCurrentContext() : EGL_NO_CONTEXT;

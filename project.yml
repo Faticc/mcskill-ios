@@ -56,6 +56,8 @@ targets:
         # Documents (logs, later the clients) show up in the Files app
         UIFileSharingEnabled: true
         LSSupportsOpeningDocumentsInPlace: true
+        # SDL: mouse and trackpad input on iPad/iPhone with a pointer
+        UIApplicationSupportsIndirectInputEvents: true
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: ru.hts.launcher
