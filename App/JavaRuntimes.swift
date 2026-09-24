@@ -149,10 +149,13 @@ struct JavaProbeResult {
         self.maxMemoryMb = maxMemoryMb
     }
 
-    /** Compiled code runs the later sort rounds several times faster than the first, interpreted one. */
+    /**
+     * The compiler ran and the sort is compiled-fast: interpreted it takes seconds, compiled ~0.1 s.
+     * Not "later rounds faster than the first": OSR compiles the loop inside round one already.
+     */
     var jitWorks: Bool {
-        guard compiler != nil, let first = sortMs.first, let best = sortMs.dropFirst().min() else { return false }
-        return best * 2 < first
+        guard compiler != nil, (compileMs ?? 0) > 0, let best = sortMs.min() else { return false }
+        return best < 400
     }
 
     var summary: String {

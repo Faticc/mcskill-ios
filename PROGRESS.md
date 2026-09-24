@@ -42,6 +42,8 @@
 - `Platform` — `@MainActor`; из `static let` вне главного актора его не трогать.
 - Генерическая сборка под симулятор собирает и x86_64: ассемблер arm64 закрывать `#if defined(__arm64__)`.
 
+5. **Java в симуляторе CI** (шаг «Java in the simulator», артефакт `java-probe`): `pack-jre.sh … simulator` меняет тег платформы JRE на 7 (`vtool`) и подписывает ad-hoc, `scripts/sim-java-probe.sh` запускает приложение с `--probe-java 8|17|25`. Итог пишется в `logs/jvm-probe.json`. Первый прогон (`35972404577`): все три JVM стартуют (72–159 мс), mixed mode, JIT через зеркальный кэш iOS 26 (`[JIT26] mapping at RW/RX`), сортировка ~60–70 мс. Это не проверяет `csops`, StikDebug, TXM и лимиты памяти настоящего iPhone.
+
 ## Следующие шаги
 
 1. **Проверить на телефоне.** Тестовый iPhone XR (A12, TXM нет, iOS не больше 18; версия пока неизвестна). JIT: StikDebug на iOS 17.4+, SideStore/JitStreamer на iOS 16 и ниже. Ставим ipa через Sideloadly, включаем JIT, «Настройки → Продвинутые → Java → Проверить» для 8, 17, 25 (с перезапуском между ними). Смотреть `jvm.log` и `launcher.log` (Файлы → HTS → logs).
