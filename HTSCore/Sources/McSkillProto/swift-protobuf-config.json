@@ -1,0 +1,9 @@
+{
+  "protocPath": "/opt/homebrew/bin/protoc",
+  "invocations": [
+    {
+      "protoFiles": ["common.proto", "auth.proto", "client.proto", "update.proto"],
+      "visibility": "Public"
+    }
+  ]
+}

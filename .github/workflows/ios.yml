@@ -1,0 +1,76 @@
+name: iOS
+
+on:
+  push:
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: macos-26
+    timeout-minutes: 45
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Tools
+        run: |
+          brew install protobuf xcodegen
+          xcodebuild -version
+          swift --version
+          /opt/homebrew/bin/protoc --version
+
+      - name: Core tests (swift test)
+        run: swift test --package-path HTSCore 2>&1 | tee core-tests.log
+
+      - name: Generate Xcode project
+        run: xcodegen generate
+
+      - name: Build for simulator
+        run: |
+          xcodebuild -project HTS.xcodeproj -scheme HTS -configuration Debug \
+            -sdk iphonesimulator -destination 'generic/platform=iOS Simulator' \
+            -derivedDataPath build/sim \
+            -skipPackagePluginValidation -skipMacroValidation \
+            build 2>&1 | tee sim-build.log | grep -E "error:|warning: .*HTS|BUILD" || true
+          test -d build/sim/Build/Products/Debug-iphonesimulator/HTS.app
+
+      - name: Simulator screenshots
+        run: bash scripts/sim-screenshots.sh build/sim/Build/Products/Debug-iphonesimulator/HTS.app screenshots
+
+      - name: Build unsigned IPA
+        run: |
+          xcodebuild -project HTS.xcodeproj -scheme HTS -configuration Release \
+            -sdk iphoneos -destination 'generic/platform=iOS' \
+            -derivedDataPath build/dev \
+            -skipPackagePluginValidation -skipMacroValidation \
+            CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO CODE_SIGN_IDENTITY="" \
+            build 2>&1 | tee device-build.log | grep -E "error:|BUILD" || true
+          test -d build/dev/Build/Products/Release-iphoneos/HTS.app
+          mkdir -p Payload
+          cp -R build/dev/Build/Products/Release-iphoneos/HTS.app Payload/
+          zip -qry HTS.ipa Payload
+          ls -la HTS.ipa
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: HTS-ipa
+          path: HTS.ipa
+          if-no-files-found: ignore
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: screenshots
+          path: screenshots
+          if-no-files-found: ignore
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: logs
+          path: |
+            *.log
+            HTSCore/Package.resolved
+          if-no-files-found: ignore
