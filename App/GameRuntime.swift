@@ -67,5 +67,7 @@ enum GameRuntime {
                                    jvmArgs: ["-Djava.class.path=\(classpath)"] + lwjglJvmArgs,
                                    mainClass: "HtsGLTest", args: [glTestReport.path],
                                    environment: environment, log: JavaRuntimes.logURL.path)
+        // The touch controls over the test window: the screenshot shows them on SDL's window
+        HTSControls.start(withSDL: sdl.path, gameDir: ClientStore.documents.path)
     }
 }

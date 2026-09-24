@@ -479,6 +479,72 @@ static void HTS_DestroyWindowWithGL(SDL_VideoDevice *_this, SDL_Window *window)
     HTS_DestroyWindow(_this, window);
 }
 
+// MARK: - input from the app's touch controls
+
+/*
+ * The app's controls overlay (App/Native/HTSControls.m) covers SDL's view and feeds the game
+ * through these: the same internal calls SDL's own UIKit input uses, so key and button state,
+ * mouse focus and relative mode stay SDL's (lwjgl3ify reads them). Called on the main thread.
+ */
+#include "../../events/SDL_keyboard_c.h"
+#include "../../events/SDL_mouse_c.h"
+
+static SDL_Window *HTS_GameWindow(void)
+{
+    int count = 0;
+    SDL_Window **windows = SDL_GetWindows(&count);
+    SDL_Window *window = count > 0 ? windows[0] : NULL;
+    SDL_free(windows);
+    return window;
+}
+
+SDL_DECLSPEC bool SDLCALL HTS_HasGameWindow(void)
+{
+    return HTS_GameWindow() != NULL;
+}
+
+/** The game has grabbed the mouse (in the world) rather than showing a cursor (menus). */
+SDL_DECLSPEC bool SDLCALL HTS_RelativeMouse(void)
+{
+    SDL_Window *window = HTS_GameWindow();
+    return window && SDL_GetWindowRelativeMouseMode(window);
+}
+
+SDL_DECLSPEC void SDLCALL HTS_SendKey(int scancode, bool down)
+{
+    SDL_SendKeyboardKey(SDL_GetTicksNS(), SDL_DEFAULT_KEYBOARD_ID, 0, (SDL_Scancode)scancode, down);
+}
+
+SDL_DECLSPEC void SDLCALL HTS_SendText(const char *text)
+{
+    SDL_SendKeyboardText(text);
+}
+
+/** relative: x, y are a movement; otherwise a position in window points. */
+SDL_DECLSPEC void SDLCALL HTS_SendMouseMotion(bool relative, float x, float y)
+{
+    SDL_Window *window = HTS_GameWindow();
+    if (window) {
+        SDL_SendMouseMotion(SDL_GetTicksNS(), window, SDL_DEFAULT_MOUSE_ID, relative, x, y);
+    }
+}
+
+SDL_DECLSPEC void SDLCALL HTS_SendMouseButton(int button, bool down)
+{
+    SDL_Window *window = HTS_GameWindow();
+    if (window) {
+        SDL_SendMouseButton(SDL_GetTicksNS(), window, SDL_DEFAULT_MOUSE_ID, (Uint8)button, down);
+    }
+}
+
+SDL_DECLSPEC void SDLCALL HTS_SendMouseWheel(float x, float y)
+{
+    SDL_Window *window = HTS_GameWindow();
+    if (window) {
+        SDL_SendMouseWheel(SDL_GetTicksNS(), window, SDL_DEFAULT_MOUSE_ID, x, y, SDL_MOUSEWHEEL_NORMAL);
+    }
+}
+
 // MARK: - install
 
 void HTS_UIKit_Install(SDL_VideoDevice *device)

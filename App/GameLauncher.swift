@@ -133,9 +133,10 @@ enum GameLauncher {
         try? FileManager.default.removeItem(at: JavaRuntimes.logURL)
         let shown = plan.jvmArgs + [plan.mainClass] + redacted(plan.gameArgs)
         AppLog.info("Launch \(plan.pack) on \(plan.runtime.title), \(plan.heapMb) MB:\n" + shown.joined(separator: "\n"))
-        try HTSJava.launch(javaHome: plan.runtime.home.path, heapMb: plan.heapMb, jvmArgs: plan.jvmArgs,
+        try HTSJava.launch(javaHome: plan.runtime.home.path, heapMb: Int32(plan.heapMb), jvmArgs: plan.jvmArgs,
                            mainClass: plan.mainClass, args: plan.gameArgs, environment: plan.environment,
                            log: JavaRuntimes.logURL.path)
+        HTSControls.start(withSDL: GameRuntime.sdl.path, gameDir: plan.gameDir.path)
     }
 
     private static func redacted(_ args: [String]) -> [String] {
