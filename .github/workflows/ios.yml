@@ -30,11 +30,11 @@ jobs:
       - name: Build for simulator
         run: |
           xcodebuild -project HTS.xcodeproj -scheme HTS -configuration Debug \
-            -sdk iphonesimulator -destination 'generic/platform=iOS Simulator' \
+            -destination 'generic/platform=iOS Simulator' \
             -derivedDataPath build/sim \
             -skipPackagePluginValidation -skipMacroValidation \
             build 2>&1 | tee sim-build.log | grep -E "error:|warning: .*HTS|BUILD" || true
-          test -d build/sim/Build/Products/Debug-iphonesimulator/HTS.app
+          test -f build/sim/Build/Products/Debug-iphonesimulator/HTS.app/Info.plist
           plutil -p build/sim/Build/Products/Debug-iphonesimulator/HTS.app/Info.plist
 
       - name: Simulator screenshots
@@ -43,12 +43,12 @@ jobs:
       - name: Build unsigned IPA
         run: |
           xcodebuild -project HTS.xcodeproj -scheme HTS -configuration Release \
-            -sdk iphoneos -destination 'generic/platform=iOS' \
+            -destination 'generic/platform=iOS' \
             -derivedDataPath build/dev \
             -skipPackagePluginValidation -skipMacroValidation \
             CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO CODE_SIGN_IDENTITY="" \
             build 2>&1 | tee device-build.log | grep -E "error:|BUILD" || true
-          test -d build/dev/Build/Products/Release-iphoneos/HTS.app
+          test -f build/dev/Build/Products/Release-iphoneos/HTS.app/Info.plist
           mkdir -p Payload
           cp -R build/dev/Build/Products/Release-iphoneos/HTS.app Payload/
           zip -qry HTS.ipa Payload
