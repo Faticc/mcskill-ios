@@ -116,7 +116,7 @@ enum GameLauncher {
             "HTS_GL_MAJOR": "3",
             "HTS_GL_MINOR": "0",
             "HTS_GL_NO_SHARE": "1",
-            "HTS_GL_PROC_LIB": GameRuntime.gl4es.path,
+            "HTS_GL_PROC_LIB": GameRuntime.glShim.path,
             "LIBGL_MIPMAP": "3",
             "LIBGL_NOERROR": "1",
         ]) { _, new in new }

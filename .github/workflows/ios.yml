@@ -50,6 +50,9 @@ jobs:
         run: |
           [ -f build/sdl-out/device/libSDL3.dylib ] || bash scripts/build-sdl.sh device build/sdl-out/device
           [ -f build/sdl-out/simulator/libSDL3.dylib ] || bash scripts/build-sdl.sh simulator build/sdl-out/simulator
+          # libhtsgl: LWJGL's GL library, every lookup through gl4es (native/htsgl.c)
+          xcrun -sdk iphoneos clang -arch arm64 -miphoneos-version-min=16.0 -O2 -dynamiclib               -install_name @rpath/libhtsgl.dylib -o build/sdl-out/device/libhtsgl.dylib native/htsgl.c
+          xcrun -sdk iphonesimulator clang -arch arm64 -mios-simulator-version-min=16.0 -O2 -dynamiclib               -install_name @rpath/libhtsgl.dylib -o build/sdl-out/simulator/libhtsgl.dylib native/htsgl.c
           mkdir -p game-cache build/gltest/classes build/gltest/lwjgl
           [ -s game-cache/lwjgl-3.4.1-ios.tar.gz ] || gh release download deps-1 -R Faticc/mcskill-ios -p lwjgl-3.4.1-ios.tar.gz -D game-cache
           tar -xzf game-cache/lwjgl-3.4.1-ios.tar.gz -C build/gltest/lwjgl

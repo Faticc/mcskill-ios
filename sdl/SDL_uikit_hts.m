@@ -319,7 +319,10 @@ static SDL_FunctionPointer HTS_GL_GetProcAddress(SDL_VideoDevice *_this, const c
 {
     void *fn = NULL;
     if (egl.gl) {
-        fn = dlsym(egl.gl, proc);
+        // gl4es's own table first: plain dlsym on it can fall through to ANGLE, its dependency
+        static void *(*gl4esLookup)(const char *);
+        if (!gl4esLookup) *(void **)&gl4esLookup = dlsym(egl.gl, "gl4es_GetProcAddress");
+        fn = gl4esLookup ? gl4esLookup(proc) : dlsym(egl.gl, proc);
     }
     if (!fn && egl.gles) {
         fn = dlsym(egl.gles, proc);

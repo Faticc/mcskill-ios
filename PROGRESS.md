@@ -64,7 +64,7 @@
 
 ## Следующие шаги
 
-1. **Вернуть CI** (решение владельца): сделать репозиторий публичным (минуты бесплатны), поднять лимит расходов или ждать нового месяца. Первый же прогон проверит перебор EGL‑конфигураций: смотреть `java-probe/gltest.json`, `gltest-jvm.log` (`[HTS] EGL …`), `gltest.png`.
+1. **CI**: репозиторий публичный с 24.09, минуты бесплатны. Первый же прогон проверит перебор EGL‑конфигураций: смотреть `java-probe/gltest.json`, `gltest-jvm.log` (`[HTS] EGL …`), `gltest.png`.
 2. Когда треугольник нарисуется в симуляторе: проверить на XR (Sideloadly, JIT через StikDebug): «Проверить Java», затем «Играть» на HiTech (1.7.10, Java 25). Логи: Файлы → HTS → logs (`launcher.log`, `jvm.log`).
 3. Дальше по результатам: HtsGLBaton/сплэш, темп кадров (`HtsSurface` без Android‑файла), звук (OpenAL из Amethyst), клавиатура чата, GLFW‑паки через Pojav‑GLFW Amethyst (мост `AngelAuraAmethyst`), NeoForge.
 

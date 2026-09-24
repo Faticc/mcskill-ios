@@ -13,6 +13,8 @@ enum GameRuntime {
 
     static var sdl: URL { frameworks.appendingPathComponent("libSDL3.dylib") }
     static var gl4es: URL { frameworks.appendingPathComponent("libgl4es_114.dylib") }
+    /** LWJGL's GL library: all lookups through gl4es (native/htsgl.c), not ANGLE's eglGetProcAddress. */
+    static var glShim: URL { frameworks.appendingPathComponent("libhtsgl.dylib") }
     static var egl: URL { frameworks.appendingPathComponent("libEGL.framework/libEGL") }
     static var gles: URL { frameworks.appendingPathComponent("libGLESv2.framework/libGLESv2") }
     static var openal: URL { frameworks.appendingPathComponent("libopenal.dylib") }
@@ -32,7 +34,7 @@ enum GameRuntime {
             "-Djava.library.path=\(frameworks.path)",
             "-Dorg.lwjgl.librarypath=\(frameworks.path)",
             "-Dorg.lwjgl.sdl.libname=\(sdl.path)",
-            "-Dorg.lwjgl.opengl.libname=\(gl4es.path)",
+            "-Dorg.lwjgl.opengl.libname=\(glShim.path)",
             "-Dorg.lwjgl.openal.libname=\(openal.path)",
             "-Dorg.lwjgl.system.allocator=system",
         ]

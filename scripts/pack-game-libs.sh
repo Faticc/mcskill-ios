@@ -38,13 +38,14 @@ cp "$work"/natives/*.dylib "$FW/"
 cp "$work"/jars/*.jar "$GAME/lwjgl-3.4.1/"
 rm -rf "$work"
 cp "$SDL" "$FW/libSDL3.dylib"
+cp "$(dirname "$SDL")/libhtsgl.dylib" "$FW/"
 cp "$BUILT/gltest.jar" "$GAME/tests/gltest.jar"
 cp "$BUILT/hts-lwjgl-patch.jar" "$GAME/"
 cp "$ROOT"/game/* "$GAME/"
 
 if [ "$TARGET" = simulator ]; then
     while IFS= read -r -d '' f; do
-        [ "$(basename "$f")" = libSDL3.dylib ] && continue
+        case "$(basename "$f")" in libSDL3.dylib|libhtsgl.dylib) continue ;; esac
         if file -b "$f" | grep -q '^Mach-O'; then
             xcrun vtool -arch arm64 -set-build-version 7 14.0 16.0 -replace -output "$f" "$f"
             codesign -f -s - "$f" 2>/dev/null
