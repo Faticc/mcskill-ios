@@ -416,7 +416,7 @@ final class AppModel: ObservableObject {
         if let loaded = HTSJava.loadedJavaHome {
             let name = (loaded as NSString).lastPathComponent
             if loaded != runtime.home.path {
-                showError("Нужен перезапуск", "В этом запуске уже работает \(name). Вторую Java iOS в одном процессе не даёт: закройте HTS и откройте снова (через StikDebug).")
+                showError("Нужен перезапуск", "В этом запуске уже работает \(name). Вторую Java iOS в одном процессе не даёт: закройте McSkill и откройте снова (через StikDebug).")
             } else {
                 showError("Уже проверено", "\(runtime.title) уже запущена в этом процессе. Для повторной проверки перезапустите приложение.")
             }

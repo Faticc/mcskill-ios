@@ -762,7 +762,7 @@ final class StreamingDownload: NSObject, URLSessionDataDelegate, @unchecked Send
         let download = StreamingDownload(part: part, offset: offset, onData: onData)
         var request = URLRequest(url: url)
         request.setValue("identity", forHTTPHeaderField: "Accept-Encoding")
-        request.setValue("HTS-McSkill-iOS", forHTTPHeaderField: "User-Agent")
+        request.setValue("McSkill-iOS", forHTTPHeaderField: "User-Agent")
         if offset > 0 { request.setValue("bytes=\(offset)-", forHTTPHeaderField: "Range") }
         let task = session.dataTask(with: request)
         task.delegate = download

@@ -22,7 +22,7 @@ enum Platform {
         UIApplication.shared.open(url)
     }
 
-    /** The folder in the Files app ("На iPhone → HTS"). */
+    /** The folder in the Files app ("На iPhone → McSkill"). */
     static func openInFiles(_ dir: URL) -> Bool {
         try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
         guard let path = dir.path.addingPercentEncoding(withAllowedCharacters: .urlPathAllowed),
