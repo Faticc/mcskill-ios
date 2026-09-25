@@ -68,7 +68,8 @@ struct SettingsModal: View {
                                 .foregroundStyle(Theme.text3)
                         }
                         .frame(width: 140, height: 38)
-                        Text("из \(LaunchSettings.deviceRamMb) MB")
+                        Text(HTSJava.maxHeapMb > 0 ? "из \(LaunchSettings.deviceRamMb) MB, iOS даёт Java до \(HTSJava.maxHeapMb) MB"
+                                                   : "из \(LaunchSettings.deviceRamMb) MB")
                             .font(Theme.medium(12))
                             .foregroundStyle(Theme.text3)
                             .padding(.leading, 10)
@@ -240,7 +241,8 @@ struct SettingsModal: View {
     private func save() {
         if !memoryAuto {
             let text = ramText.trimmingCharacters(in: .whitespaces)
-            let max = LaunchSettings.deviceRamMb - 1024
+            // A 3 GB iPhone without extended VA has one ~2 GB hole for the heap (HTSJava.maxHeapMb)
+            let max = min(LaunchSettings.deviceRamMb - 1024, HTSJava.maxHeapMb > 0 ? HTSJava.maxHeapMb : Int.max)
             var error: String?
             var ram = 0
             if text.isEmpty {

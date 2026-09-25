@@ -8,6 +8,7 @@
 #include <fcntl.h>
 #include <mach/mach.h>
 #include <mach/mach_time.h>
+#include <os/proc.h>
 #include <pthread.h>
 #include <sys/mman.h>
 #include <unistd.h>
@@ -150,6 +151,118 @@ static BOOL JITEnabled(void) {
     return DebuggerAttached();
 }
 
+// MARK: - address space
+
+/*
+ * Without extended-virtual-addressing a 3 GB iPhone gets the small address space: the one big hole
+ * is the ~2 GB below the dyld shared cache, and the Java heap has to be a single piece of it. The
+ * launcher's own mappings (UIKit, ANGLE, downloads) would split that hole, so it is reserved when
+ * the app loads and handed back right before JNI_CreateJavaVM. Mappings go first-fit from the
+ * bottom, so the reservation leaves some slack below it: the launcher's allocations land there, and
+ * later HotSpot's code cache, which it reserves before the heap.
+ */
+#define kMB ((size_t)1 << 20)
+/** A hole this big means extended VA (or the simulator): nothing to guard. */
+#define kPlentyVA (4096 * kMB)
+#define kSlack (256 * kMB)
+/** -XX:ReservedCodeCacheSize: 240 MB by default with tiered compilation. */
+#define kCodeCacheMb 128
+/** What the launcher and the JVM map into the hole besides the code cache and the heap. */
+#define kOtherMappingsMb 64
+
+static uint8_t *gReserve;
+static size_t gReserveSize;
+static size_t gHoleAtLoad;
+/** The biggest -Xmx that should fit, 0 = no address space limit; set with the reservation. */
+static int gMaxHeapMb;
+
+static size_t LargestHole(void) {
+    const size_t step = 16 * kMB;
+    size_t lo = 0, hi = kPlentyVA / step;
+    while (lo < hi) {
+        size_t mid = (lo + hi + 1) / 2;
+        void *map = mmap(NULL, mid * step, PROT_NONE, MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
+        if (map != MAP_FAILED) {
+            munmap(map, mid * step);
+            lo = mid;
+        } else {
+            hi = mid - 1;
+        }
+    }
+    return lo * step;
+}
+
+static void ReserveHeapSpace(void) {
+    size_t hole = LargestHole();
+    int mb = (int)(hole / kMB) - kCodeCacheMb - kOtherMappingsMb;
+    gMaxHeapMb = hole >= kPlentyVA ? 0 : mb > 64 ? mb - mb % 64 : 64;
+    if (hole >= kPlentyVA || hole <= 2 * kSlack) return;
+    uint8_t *map = mmap(NULL, hole, PROT_NONE, MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
+    if (map == MAP_FAILED) return;
+    munmap(map, kSlack);
+    gReserve = map + kSlack;
+    gReserveSize = hole - kSlack;
+}
+
+static void ReleaseHeapSpace(void) {
+    if (!gReserve) return;
+    munmap(gReserve, gReserveSize);
+    gReserve = NULL;
+    gReserveSize = 0;
+}
+
+__attribute__((constructor))
+static void ReserveHeapSpaceAtLoad(void) {
+    gHoleAtLoad = LargestHole();
+    ReserveHeapSpace();
+}
+
+/** Free gaps of 32 MB and more between the mappings, for jvm.log. */
+static NSString *AddressSpaceGaps(void) {
+    NSMutableArray<NSString *> *gaps = [NSMutableArray array];
+    vm_address_t address = 0, end = 0;
+    for (;;) {
+        vm_size_t size = 0;
+        vm_region_basic_info_data_64_t info;
+        mach_msg_type_number_t count = VM_REGION_BASIC_INFO_COUNT_64;
+        mach_port_t object = MACH_PORT_NULL;
+        vm_address_t start = address;
+        if (vm_region_64(mach_task_self(), &start, &size, VM_REGION_BASIC_INFO_64,
+                         (vm_region_info_t)&info, &count, &object) != KERN_SUCCESS) break;
+        if (end && start - end >= 32 * kMB) {
+            [gaps addObject:[NSString stringWithFormat:@"0x%lx+%luM", (unsigned long)end, (unsigned long)((start - end) / kMB)]];
+        }
+        end = start + size;
+        address = end;
+    }
+    return [NSString stringWithFormat:@"%@, last mapping ends at 0x%lx", [gaps componentsJoinedByString:@" "], (unsigned long)end];
+}
+
+static NSString *Entitlement(NSString *name) {
+    void *security = dlopen("/System/Library/Frameworks/Security.framework/Security", RTLD_NOW);
+    void *(*createFromSelf)(CFAllocatorRef) = security ? dlsym(security, "SecTaskCreateFromSelf") : NULL;
+    CFTypeRef (*copyValue)(void *, CFStringRef, CFErrorRef *) =
+        security ? dlsym(security, "SecTaskCopyValueForEntitlement") : NULL;
+    if (!createFromSelf || !copyValue) return @"?";
+    void *task = createFromSelf(NULL);
+    if (!task) return @"?";
+    CFTypeRef value = copyValue(task, (__bridge CFStringRef)name, NULL);
+    CFRelease(task);
+    if (!value) return @"no";
+    NSString *s = CFGetTypeID(value) == CFBooleanGetTypeID() ? (CFBooleanGetValue((CFBooleanRef)value) ? @"yes" : @"false")
+                                                             : @"set";
+    CFRelease(value);
+    return s;
+}
+
+static void LogMemory(const char *when) {
+    size_t available = os_proc_available_memory();
+    printf("[HTS] memory %s: largest hole %zu MB (%zu MB at load), reserved %zu MB, available to the app %zu MB\n"
+           "[HTS]   gaps: %s\n",
+           when, LargestHole() / kMB, gHoleAtLoad / kMB, gReserveSize / kMB, available / kMB,
+           AddressSpaceGaps().UTF8String);
+}
+
 // MARK: - JVM
 
 typedef jint (JNICALL *CreateJavaVM_t)(JavaVM **, void **, void *);
@@ -206,12 +319,6 @@ static void RedirectStdio(NSString *path) {
     close(fd);
 }
 
-static BOOL EnoughVirtualMemory(size_t mb) {
-    size_t size = mb << 20;
-    void *map = mmap(NULL, size, PROT_READ | PROT_WRITE, MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
-    return map != MAP_FAILED && munmap(map, size) == 0;
-}
-
 /** The TXM path of Amethyst's launchJVM: hand the extension script to StikDebug. */
 static NSString *PrepareTXM(void) {
     size_t page = getpagesize();
@@ -247,9 +354,10 @@ static NSString *StartVM(HTSProbeJob *job, JNIEnv **envOut) {
         NSString *error = PrepareTXM();
         if (error) return error;
     }
-    if (!EnoughVirtualMemory(job.heapMb)) {
-        return [NSString stringWithFormat:@"Не хватает непрерывной виртуальной памяти на %d МБ", job.heapMb];
-    }
+    printf("[HTS] entitlements: extended-virtual-addressing %s, increased-memory-limit %s\n",
+           Entitlement(@"com.apple.developer.kernel.extended-virtual-addressing").UTF8String,
+           Entitlement(@"com.apple.developer.kernel.increased-memory-limit").UTF8String);
+    LogMemory("before the JVM");
 
     // libjli first so libjava finds it by install name, then libjvm
     NSString *jli8 = [home stringByAppendingPathComponent:@"lib/jli/libjli.dylib"];
@@ -281,6 +389,8 @@ static NSString *StartVM(HTSProbeJob *job, JNIEnv **envOut) {
         @"-XX:+DisablePrimordialThreadGuardPages",
         // Without the extended-virtual-addressing entitlement the compressed class space can't be reserved
         @"-XX:-UseCompressedClassPointers",
+        // Reserved before the heap and out of the same hole (see ReserveHeapSpace)
+        [NSString stringWithFormat:@"-XX:ReservedCodeCacheSize=%dM", kCodeCacheMb],
         [NSString stringWithFormat:@"-Djava.io.tmpdir=%@", NSTemporaryDirectory()],
         [NSString stringWithFormat:@"-Duser.home=%@", docs],
         [NSString stringWithFormat:@"-Duser.dir=%@", docs],
@@ -307,6 +417,17 @@ static NSString *StartVM(HTSProbeJob *job, JNIEnv **envOut) {
         .ignoreUnrecognized = JNI_FALSE,
     };
 
+    // The heap's hole goes back only now, after the dylibs are mapped; HotSpot takes the code cache
+    // from its bottom first, then the heap
+    ReleaseHeapSpace();
+    size_t hole = LargestHole();
+    if (hole < kPlentyVA && hole / kMB < (size_t)(job.heapMb + kCodeCacheMb + 32)) {
+        ReserveHeapSpace();
+        LogMemory("too little");
+        return [NSString stringWithFormat:@"Не хватает непрерывной виртуальной памяти на %d МБ: iOS даёт одним куском %zu МБ, "
+                                          @"поставьте память не больше %d МБ", job.heapMb, hole / kMB, gMaxHeapMb];
+    }
+
     // The JVM installs its own handlers
     signal(SIGSEGV, SIG_DFL);
     signal(SIGBUS, SIG_DFL);
@@ -321,6 +442,7 @@ static NSString *StartVM(HTSProbeJob *job, JNIEnv **envOut) {
     jint rc = create(&vm, (void **)&env, &init);
     uint64_t t1 = mach_absolute_time();
     if (rc != JNI_OK) return [NSString stringWithFormat:@"JNI_CreateJavaVM вернул %d, подробности в jvm.log", rc];
+    LogMemory("with the JVM");
 
     gVM = vm;
     gLoadedHome = [home copy];
@@ -472,6 +594,10 @@ static void *ProbeThread(void *arg) {
 
 + (HTSJITFlags)jitFlags {
     return ComputeJITFlags();
+}
+
++ (NSInteger)maxHeapMb {
+    return gMaxHeapMb;
 }
 
 + (NSString *)loadedJavaHome {

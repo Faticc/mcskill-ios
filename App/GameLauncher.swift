@@ -146,12 +146,12 @@ enum GameLauncher {
     /**
      * PC options that break or mean nothing here: heap (the app's setting), native paths (the iOS
      * builds), macOS's first-thread flag, pre-touching the heap, NUMA, GCs other than G1, large
-     * pages, heap dumps, the 1.7.10 log4j config (ours closes the lookup hole), compact object
+     * pages, the code cache size (it shares the heap's hole), heap dumps, the 1.7.10 log4j config (ours closes the lookup hole), compact object
      * headers (they need the compressed class space iOS can't reserve without extended VA).
      */
     private static func droppedOnIOS(_ arg: String) -> Bool {
         let prefixes = ["-Xms", "-Xmx", "-Xmn", "-Djava.library.path=", "-Dorg.lwjgl.librarypath=", "-XX:HeapDumpPath",
-                        "-XX:+UseLargePages", "-XX:LargePageSizeInBytes", "-XX:+UseTransparentHugePages",
+                        "-XX:+UseLargePages", "-XX:LargePageSizeInBytes", "-XX:ReservedCodeCacheSize=", "-XX:+UseTransparentHugePages",
                         "-Dlog4j.configurationFile="]
         if prefixes.contains(where: { arg.hasPrefix($0) }) { return true }
         return ["-XstartOnFirstThread", "-XX:+AlwaysPreTouch", "-XX:+UseNUMA", "-XX:+UseZGC", "-XX:+ZGenerational",

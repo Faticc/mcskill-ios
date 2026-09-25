@@ -324,12 +324,13 @@ final class AppModel: ObservableObject {
         return s >= 3600 ? "\(s / 3600)ч \(s % 3600 / 60)м" : s >= 60 ? "\(s / 60)м \(s % 60)с" : "\(s)с"
     }
 
-    /** Heap: the setting, or in auto mode the profile's recommendation within half the RAM. */
+    /** Heap: the setting, or in auto mode the profile's recommendation within half the RAM and the address space. */
     private func heapMb(_ profile: ClientProfileInfo) -> Int {
         if !Prefs.memoryAuto { return LaunchSettings.load().ramMb }
         let physical = Int(ProcessInfo.processInfo.physicalMemory >> 20)
         let recommended = ClientProfileInfo.megabytes(profile.recommendedRam)
-        return max(768, min(recommended > 0 ? recommended : 2048, physical / 2))
+        let fits = HTSJava.maxHeapMb > 0 ? HTSJava.maxHeapMb : Int.max
+        return max(768, min(recommended > 0 ? recommended : 2048, physical / 2, fits))
     }
 
     private func launch(_ server: ServerInfo, _ result: ClientSync.Result, session: McSkillSession) {

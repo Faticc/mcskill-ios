@@ -25,6 +25,11 @@ typedef NS_OPTIONS(uint32_t, HTSJITFlags) {
 /** A debugger (StikDebug) is attached right now. */
 @property (class, readonly) BOOL debuggerAttached;
 @property (class, readonly) HTSJITFlags jitFlags;
+/**
+ * The biggest heap (MB) that fits the address space iOS gave the app, 0 = no such limit (extended
+ * VA). A 3 GB iPhone without that entitlement has one ~2 GB hole for the heap and the code cache.
+ */
+@property (class, readonly) NSInteger maxHeapMb;
 /** Java home of the JVM running in this process, nil before the first start. */
 @property (class, readonly, nullable) NSString *loadedJavaHome;
 
